@@ -243,6 +243,20 @@ async function main() {
   check('CSV export', csv.includes('"Priya Sharma"') && csv.split('\n')[0].includes('profileUrl'));
   await shot('08-tracker', panel3);
 
+  // ── 8b. In-app navigation (URL changes before the DOM does) ──────────────
+  console.log('\nIn-app navigation');
+  await panel3.click('#tab-compose');
+  await li.evaluate(() => {
+    history.pushState({}, '', '/in/jordan-lee-test/');
+    setTimeout(() => {
+      document.querySelector('main').innerHTML =
+        '<section><h1>Jordan Lee</h1><p>Staff Engineer at Acme | Infra</p><p>Austin, Texas, United States</p></section>';
+    }, 1800);
+  });
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Jordan Lee', null, { timeout: 12000 });
+  const sj = await sw.evaluate(() => Sessions.get('jordan-lee-test'));
+  check('stale DOM not read as the new person', sj.profile.name === 'Jordan Lee' && sj.profile.currentCompany === 'Acme', sj.profile.name);
+
   // ── 9. SPA-ish navigation to a different layout ──────────────────────────
   console.log('\nSecond profile (p-tag layout)');
   await li.goto('https://www.linkedin.com/in/alex-chen-test/');

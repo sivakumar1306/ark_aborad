@@ -38,13 +38,30 @@
     try { return decodeURIComponent(m[1]).toLowerCase(); } catch (_) { return m[1].toLowerCase(); }
   }
 
+  // Name we last read for each slug. LinkedIn swaps pages without reloading, so
+  // right after navigating, the URL is new but the DOM may still show the
+  // previous person. Wait until the heading belongs to someone else.
+  const seen = new Map();
+
   async function scrape({ full = true, expectKey } = {}) {
     if (!currentSlug()) throw new Error('This isn’t a LinkedIn profile page.');
-    if (expectKey && currentSlug() !== expectKey) await wait(600); // SPA still swapping pages
+    if (expectKey && currentSlug() !== expectKey) await wait(600); // URL not updated yet
     await waitFor(() => document.querySelector('main h1, h1'), 5000);
+
+    const slug = currentSlug();
+    const heading = () => clean(document.querySelector('main h1, h1')?.textContent);
+    const staleNames = [...seen].filter(([s]) => s !== slug).map(([, n]) => n);
+    if (!seen.has(slug) && staleNames.includes(heading())) {
+      await waitFor(() => !staleNames.includes(heading()), 4000);
+    }
+
     if (full) await loadLazySections();
     const data = scrapeProfile();
-    if (!data.name) throw new Error('Couldn’t find the profile on this page yet — wait for it to load, then try again.');
+    if (!data.name) throw new Error('Couldn’t find the profile on this page yet. Wait for it to load, then try again.');
+    if (!seen.has(slug) && staleNames.includes(data.name)) {
+      throw new Error('LinkedIn is still loading this profile. Try again in a second.');
+    }
+    seen.set(slug, data.name);
     return { ...data, full: !!full, scrapedAt: Date.now() };
   }
 
@@ -327,9 +344,16 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 1.9 1.9.8-1.9.8L19 20.5l-.8-1.9-1.9-.8 1.9-.8z"/></svg>
         Write outreach
       </button>`;
-    root.querySelector('button').addEventListener('click', () => {
+    const btn = root.querySelector('button');
+    btn.addEventListener('click', () => {
       try {
-        chrome.runtime.sendMessage({ type: 'OPEN_PANEL' }, () => void chrome.runtime.lastError);
+        chrome.runtime.sendMessage({ type: 'OPEN_PANEL' }, (r) => {
+          if (chrome.runtime.lastError || !r?.ok) {
+            // Chrome refused to open the panel from here; tell the user what does work.
+            btn.lastChild.textContent = ' Click the toolbar icon (Alt+Shift+O)';
+            setTimeout(() => { btn.lastChild.textContent = ' Write outreach'; }, 4000);
+          }
+        });
       } catch (_) {
         host.remove(); // extension was reloaded; this copy is orphaned
       }

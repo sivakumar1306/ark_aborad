@@ -54,9 +54,9 @@ chrome.commands.onCommand.addListener((command, tab) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'OPEN_PANEL' && sender.tab) {
     // Must be called synchronously to keep the user-gesture from the in-page button.
-    chrome.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
-    sendResponse({ ok: true });
-    return false;
+    chrome.sidePanel.open({ windowId: sender.tab.windowId })
+      .then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
+    return true;
   }
   const handler = HANDLERS[msg?.type];
   if (!handler) return false;

@@ -72,10 +72,11 @@ linkedin extention/
 
 ## Tests
 
-`tests/e2e.js` loads the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Ark API (`tests/mock-server.js`). It covers 51 checks:
+`tests/e2e.js` loads the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Ark API (`tests/mock-server.js`). It covers 52 checks:
 - onboarding and key validation
 - scraping both page layouts
 - quick and deep generation
+- LinkedIn swapping pages before the content updates
 - closing the panel mid-run
 - hook selection
 - the 200/300 limits and trimming
