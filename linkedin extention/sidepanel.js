@@ -10,7 +10,7 @@ const $  = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const SETTINGS_KEYS = ['licenseKey', 'userName', 'userBio', 'resumeFileName', 'license', 'prefs',
-  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded'];
+  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed'];
 const DEFAULT_PREFS = { purpose: 'Networking', tone: 'Neutral', format: 'note', mode: 'quick' };
 
 const state = {
@@ -53,8 +53,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   chrome.tabs.onUpdated.addListener((tabId, info) => {
     if (!state.tab || tabId !== state.tab.id) return;
+    // Always re-check on load complete: the URL event may have been handled while
+    // the tab was still loading (when we skip reading).
     if (info.url) refreshTab({ navigated: true });
-    else if (info.status === 'complete' && state.key && !state.session?.profile) refreshTab();
+    else if (info.status === 'complete') refreshTab();
   });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 });
@@ -96,6 +98,8 @@ function onStorageChanged(changes, area) {
     if (changes.theme) applyTheme();
     if (changes.license || changes.licenseKey) { renderQuota(); renderKeyStatus(); }
     if (changes.licenseKey) revalidateSoon();
+    if (changes.myProfile) renderMe();
+    if (changes.userName || changes.userBio) syncAboutFields();
     renderCompose();
   }
 }
@@ -219,8 +223,16 @@ function wireCompose() {
 
   $('message').addEventListener('input', () => {
     renderMeter();
+    autoGrow();
+    renderCheckSoon();
     saveMessageEdit();
   });
+
+  $('message').addEventListener('scroll', () => { $('msg-backdrop').scrollTop = $('message').scrollTop; });
+  $('check-toggle').addEventListener('click', () => toggleCheck());
+  $('fix-ai-btn').addEventListener('click', fixWithAI);
+  $('nudge-import').addEventListener('click', () => importMe($('nudge-import')));
+  $('nudge-dismiss').addEventListener('click', () => chrome.storage.local.set({ groundNudgeDismissed: true }));
 
   $('v-prev').addEventListener('click', () => stepVersion(-1));
   $('v-next').addEventListener('click', () => stepVersion(1));
@@ -231,7 +243,7 @@ function wireCompose() {
 
 function currentOptions(extra = {}) {
   const p = prefs();
-  return { purpose: p.purpose, tone: p.tone, format: p.format, mode: p.mode, ...extra };
+  return { purpose: p.purpose, tone: p.tone, format: p.format, mode: p.mode, commonGround: selectedCommon().map(c => c.text), ...extra };
 }
 
 async function onPrimary({ another = false, shorten = false } = {}) {
@@ -289,6 +301,7 @@ function renderCompose() {
 
   const s = state.session || Sessions.blank(state.key);
   renderProfile(s);
+  renderGround(s);
   renderSteps(s);
   renderHooks(s);
   renderError(s);
@@ -321,7 +334,7 @@ function renderProfile(s) {
   const found = [
     p.currentTitle && 'role',
     p.about && 'about',
-    p.experienceEntries?.length && `${p.experienceEntries.length} roles`,
+    p.experienceEntries?.length && `${p.experienceEntries.length} role${p.experienceEntries.length > 1 ? 's' : ''}`,
     p.recentPosts?.length && `${p.recentPosts.length} post${p.recentPosts.length > 1 ? 's' : ''}`,
     p.skills?.length && `${p.skills.length} skills`
   ].filter(Boolean);
@@ -446,6 +459,8 @@ function renderResult(s) {
   $('v-prev').disabled = s.active <= 0;
   $('v-next').disabled = s.active >= s.versions.length - 1;
   renderMeter();
+  autoGrow();
+  renderCheck();
   renderSentRow();
 }
 
@@ -587,6 +602,7 @@ function filteredContacts() {
 }
 
 function renderTracker() {
+  renderInsights();
   const due = state.contacts.filter(c => ContactStore.isDue(c)).length;
   $('due-badge').textContent = due;
   $('due-badge').classList.toggle('hidden', !due);
@@ -697,6 +713,10 @@ function wireSettings() {
     renderResume();
   });
 
+  $('import-me').addEventListener('click', () => importMe($('import-me')));
+  $('reimport-me').addEventListener('click', () => importMe($('reimport-me')));
+  $('remove-me').addEventListener('click', () => chrome.storage.local.remove('myProfile'));
+
   wireSegmented('set-note-limit', async v => { await chrome.storage.local.set({ noteLimit: Number(v) }); setSegmented('set-note-limit', v); renderOptions(); flash(); });
   wireSegmented('set-theme', async v => { await chrome.storage.local.set({ theme: v }); setSegmented('set-theme', v); flash(); });
   $('set-followup').addEventListener('change', async e => { await chrome.storage.local.set({ followUpDays: Number(e.target.value) }); flash(); });
@@ -715,6 +735,15 @@ function renderSettingsForm() {
   $('set-fab').checked = s.showFab !== false;
   renderResume();
   renderKeyStatus();
+  renderMe();
+}
+
+function syncAboutFields() {
+  const s = state.settings;
+  if (document.activeElement !== $('user-name')) $('user-name').value = s.userName || '';
+  if (document.activeElement !== $('user-bio')) { $('user-bio').value = s.userBio || ''; renderBioCount(); }
+  if (document.activeElement !== $('ob-name')) $('ob-name').value = s.userName || '';
+  if (document.activeElement !== $('ob-bio')) $('ob-bio').value = s.userBio || '';
 }
 
 function renderBioCount() {
@@ -829,6 +858,7 @@ function wireOnboarding() {
   $('ob-key').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
   $('ob-name').value = state.settings.userName || '';
   $('ob-bio').value = state.settings.userBio || '';
+  $('ob-import').addEventListener('click', () => importMe($('ob-import')));
   $('ob-next').addEventListener('click', async () => {
     await chrome.storage.local.set({ userName: $('ob-name').value.trim(), userBio: $('ob-bio').value.trim() });
     obStep(3);
@@ -842,6 +872,299 @@ function wireOnboarding() {
   };
   $('ob-done').addEventListener('click', finish);
   $('ob-skip').addEventListener('click', finish);
+}
+
+// ─── Common ground ────────────────────────────────────────────────────────────
+function isSelf() {
+  const me = state.settings.myProfile;
+  return !!(me && state.key && Sessions.keyFromUrl(me.profileUrl) === state.key);
+}
+
+function commonFor(s) {
+  const me = state.settings.myProfile;
+  const them = Sessions.effectiveProfile(s);
+  if (!me || !them || isSelf()) return [];
+  return CommonGround.find(me, them);
+}
+
+function selectedCommon() {
+  const s = state.session;
+  if (!s) return [];
+  const picks = s.commonPicks || {};
+  return commonFor(s).filter((c, i) => (c.id in picks ? picks[c.id] : i < 2));
+}
+
+function renderGround(s) {
+  const self = isSelf();
+  $('self-banner').classList.toggle('hidden', !self);
+  const hasMe = !!state.settings.myProfile;
+  $('ground-nudge').classList.toggle('hidden', hasMe || !s.profile || !!state.settings.groundNudgeDismissed || !state.settings.onboarded);
+
+  const items = commonFor(s);
+  $('ground').classList.toggle('hidden', !items.length);
+  const list = $('ground-list');
+  list.innerHTML = '';
+  const chosen = new Set(selectedCommon().map(c => c.id));
+  for (const c of items) {
+    const label = el('label', 'hook');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = chosen.has(c.id);
+    cb.disabled = Sessions.isBusy(s);
+    cb.addEventListener('change', () => {
+      const picks = { ...(state.session?.commonPicks || {}) };
+      items.forEach((x, i) => { if (!(x.id in picks)) picks[x.id] = i < 2; });
+      picks[c.id] = cb.checked;
+      patchSession({ commonPicks: picks });
+    });
+    const span = el('span', '', c.text);
+    if (c.detail) span.appendChild(el('span', 'muted', ` · ${c.detail}`));
+    label.append(cb, span);
+    list.appendChild(label);
+  }
+}
+
+async function importMe(btn) {
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Reading your profile…';
+  const r = await send({ type: 'IMPORT_ME', returnTabId: state.tab?.id });
+  btn.disabled = false;
+  btn.textContent = prev;
+  if (!r.ok) { toast(r.error, { type: 'error', ms: 5000 }); return; }
+  const filled = [r.filledName && 'name', r.filledBio && 'bio'].filter(Boolean);
+  toast(`Imported ${r.profile.name}.${filled.length ? ` Filled in your ${filled.join(' and ')}.` : ''}`);
+  syncAboutFields();
+}
+
+function renderMe() {
+  const me = state.settings.myProfile;
+  $('me-empty').classList.toggle('hidden', !!me);
+  $('me-card').classList.toggle('hidden', !me);
+  if (!me) return;
+  $('me-avatar').textContent = initials(me.name);
+  $('me-avatar').style.background = avatarColor(me.name);
+  $('me-name').textContent = me.name;
+  const bits = [
+    me.educationEntries?.length && `${me.educationEntries.length} school${me.educationEntries.length > 1 ? 's' : ''}`,
+    me.experienceEntries?.length && `${me.experienceEntries.length} role${me.experienceEntries.length > 1 ? 's' : ''}`,
+    me.skills?.length && `${me.skills.length} skills`
+  ].filter(Boolean);
+  $('me-meta').textContent = `${bits.join(' · ')} · imported ${relTime(me.importedAt)}`;
+}
+
+// ─── Before-you-send check: fact check + writing lint ─────────────────────────
+let lastCheck = null;
+const renderCheckSoon = debounce(() => renderCheck(), 150);
+
+function runCheck() {
+  const s = state.session;
+  const v = activeVersion();
+  if (!s || !v) return null;
+  const text = $('message').value;
+  const profile = Sessions.effectiveProfile(s);
+  const grounding = Grounding.check(text, {
+    profile,
+    research: s.research,
+    hooks: (s.hooks || []).map(h => h.text),
+    common: commonFor(s),
+    userBio: state.settings.userBio,
+    userName: state.settings.userName,
+    myProfile: state.settings.myProfile
+  });
+  const lint = Lint.check(text, { format: v.format, recipientName: profile?.name, grounding, userName: state.settings.userName });
+  return { text, grounding, lint, versionId: v.id };
+}
+
+function renderCheck() {
+  const c = runCheck();
+  lastCheck = c;
+  if (!c) return;
+  const { grounding: g, lint } = c;
+  const errors = lint.filter(i => i.level === 'error').length;
+  const warns = lint.filter(i => i.level === 'warn' && !i.hidden).length + g.unverified;
+  const tips = lint.filter(i => i.level === 'tip').length;
+  const factual = g.backed + g.unverified;
+
+  // Header summary.
+  const badge = $('check-badge');
+  const level = errors ? 'error' : warns ? 'warn' : 'ok';
+  badge.dataset.level = level;
+  badge.textContent = errors ? '✕' : warns ? '!' : '✓';
+  const parts = [];
+  if (factual) parts.push(g.unverified ? `${g.backed}/${factual} claims backed` : `All ${factual} claim${factual > 1 ? 's' : ''} backed`);
+  else parts.push('No factual claims');
+  const issueCount = errors + lint.filter(i => i.level === 'warn' && !i.hidden).length + tips;
+  if (issueCount) parts.push(`${issueCount} writing note${issueCount > 1 ? 's' : ''}`);
+  $('check-summary').textContent = parts.join(' · ');
+  $('check').dataset.level = level;
+
+  // Auto-open when something needs attention (once per version).
+  if ((errors || g.unverified) && state.checkOpenedFor !== c.versionId) {
+    state.checkOpenedFor = c.versionId;
+    toggleCheck(true);
+  }
+
+  // Facts list: unverified first, then backed.
+  const facts = $('facts-list');
+  facts.innerHTML = '';
+  const factual_s = g.sentences.filter(x => x.status !== 'neutral').sort((a, b) => (a.status === 'unverified' ? -1 : 0) - (b.status === 'unverified' ? -1 : 0));
+  for (const sen of factual_s) {
+    const li = el('li', `check-item ${sen.status === 'unverified' ? 'warn' : 'ok'}`);
+    li.tabIndex = 0;
+    li.appendChild(el('span', 'ci-icon', sen.status === 'unverified' ? '!' : '✓'));
+    const body = el('div', 'ci-body');
+    body.appendChild(el('div', 'ci-title', `“${sen.text.length > 90 ? sen.text.slice(0, 88) + '…' : sen.text}”`));
+    if (sen.status === 'unverified') {
+      const missing = sen.missing.map(m => m.display || m.value);
+      const where = sen.aboutSender ? 'your bio or profile' : 'their profile or the research';
+      body.appendChild(el('div', 'ci-detail', `Couldn’t find ${listOf(missing.map(x => `“${x}”`))} in ${where}. Check before sending.`));
+    } else {
+      const src = sen.claims.find(cl => cl.source)?.source;
+      if (src) body.appendChild(el('div', 'ci-detail', `${src.label}: ${src.snippet}`));
+    }
+    li.appendChild(body);
+    li.addEventListener('click', () => selectRange(sen.start, sen.end));
+    facts.appendChild(li);
+  }
+  $('facts-section').classList.toggle('hidden', !factual_s.length);
+
+  const lintList = $('lint-list');
+  lintList.innerHTML = '';
+  for (const i of lint.filter(x => !x.hidden)) {
+    const li = el('li', `check-item ${i.level === 'error' ? 'error' : i.level === 'warn' ? 'warn' : 'tip'}`);
+    li.appendChild(el('span', 'ci-icon', i.level === 'error' ? '✕' : i.level === 'warn' ? '!' : '•'));
+    const body = el('div', 'ci-body');
+    body.append(el('div', 'ci-title', i.title), el('div', 'ci-detail', i.detail));
+    li.appendChild(body);
+    if (i.match) {
+      li.tabIndex = 0;
+      li.addEventListener('click', () => {
+        const at = c.text.indexOf(i.match);
+        if (at >= 0) selectRange(at, at + i.match.length);
+      });
+    }
+    lintList.appendChild(li);
+  }
+  $('lint-section').classList.toggle('hidden', !lint.filter(x => !x.hidden).length);
+
+  const fixable = g.unverified || errors || lint.some(i => i.level === 'warn' && !i.hidden) || lint.some(i => i.id === 'no-ask' || i.id === 'me-me-me');
+  $('fix-ai-btn').disabled = !fixable || Sessions.isBusy(state.session);
+
+  renderBackdrop(c);
+}
+
+function toggleCheck(force) {
+  const body = $('check-body');
+  const open = force !== undefined ? force : body.classList.contains('hidden');
+  body.classList.toggle('hidden', !open);
+  $('check-toggle').setAttribute('aria-expanded', String(open));
+  $('check').classList.toggle('open', open);
+}
+
+// Inline highlights: a mirror div behind the transparent textarea.
+function renderBackdrop(c) {
+  const bd = $('msg-backdrop');
+  const text = c.text;
+  let html = '';
+  let pos = 0;
+  for (const sen of c.grounding.sentences) {
+    if (sen.status === 'neutral') continue;
+    html += escapeHtml(text.slice(pos, sen.start));
+    let inner = escapeHtml(text.slice(sen.start, sen.end));
+    if (sen.status === 'unverified') {
+      for (const m of sen.missing) {
+        const term = escapeHtml(m.display || m.value);
+        const i = inner.indexOf(term);
+        if (i >= 0) inner = inner.slice(0, i) + `<mark class="miss">${term}</mark>` + inner.slice(i + term.length);
+      }
+    }
+    html += `<span class="hl ${sen.status}">${inner}</span>`;
+    pos = sen.end;
+  }
+  html += escapeHtml(text.slice(pos)) + '\n';
+  bd.innerHTML = html;
+  bd.scrollTop = $('message').scrollTop;
+}
+
+function autoGrow() {
+  const ta = $('message');
+  ta.style.height = 'auto';
+  ta.style.height = Math.max(150, ta.scrollHeight + 2) + 'px';
+}
+
+function selectRange(start, end) {
+  const ta = $('message');
+  ta.focus();
+  ta.setSelectionRange(start, end);
+}
+
+async function fixWithAI() {
+  const c = lastCheck || runCheck();
+  const v = activeVersion();
+  if (!c || !v || !state.key) return;
+  const revise = {
+    unverified: c.grounding.sentences.filter(x => x.status === 'unverified').map(x => x.text),
+    cliches: c.lint.filter(i => i.id.startsWith('cliche:')).map(i => `“${i.match}”`),
+    other: c.lint.filter(i => !i.id.startsWith('cliche:') && !i.hidden && i.id !== 'unverified').map(i => `${i.title}: ${i.detail}`)
+  };
+  const r = await send({
+    type: 'WRITE', key: state.key, tabId: state.tab?.id,
+    options: currentOptions({ format: v.format, revise, previous: c.text })
+  });
+  if (!r.ok) toast(r.error, { type: 'error' });
+  else toast('Rewriting with fixes…');
+}
+
+// ─── Insights: what gets replies ──────────────────────────────────────────────
+function renderInsights() {
+  const box = $('insights');
+  const sent = state.contacts.filter(c => c.status === 'sent' || c.status === 'replied');
+  if (sent.length < 3) {
+    box.classList.toggle('hidden', !state.contacts.length);
+    box.innerHTML = '';
+    if (state.contacts.length) {
+      box.appendChild(el('div', 'ins-hint', `Mark messages as sent and replied. After ${3 - sent.length} more sent, you’ll see what gets replies.`));
+    }
+    return;
+  }
+  const replied = sent.filter(c => c.status === 'replied').length;
+  const rate = (xs) => (xs.length ? xs.filter(c => c.status === 'replied').length / xs.length : 0);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const comparisons = [
+    ['with common ground', c => (c.signals?.common || 0) > 0, 'without'],
+    ['written with Deep research', c => c.signals?.mode === 'deep', 'with Quick'],
+    ['sent as connection notes', c => (c.signals?.format || c.format) === 'note', 'other formats'],
+    ['in a Casual tone', c => c.signals?.tone === 'Casual', 'other tones']
+  ];
+  let best = null;
+  for (const [label, pred, otherLabel] of comparisons) {
+    const a = sent.filter(pred), b = sent.filter(c => !pred(c));
+    if (a.length < 2 || b.length < 2) continue;
+    const diff = rate(a) - rate(b);
+    if (!best || Math.abs(diff) > Math.abs(best.diff)) best = { label, otherLabel, diff, ra: rate(a), rb: rate(b), na: a.length, nb: b.length };
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = '';
+  const head = el('div', 'ins-head');
+  head.append(el('span', 'ins-big', pct(replied / sent.length)), el('span', 'ins-label', `reply rate · ${replied} of ${sent.length} sent`));
+  box.appendChild(head);
+  if (best && Math.abs(best.diff) >= 0.15) {
+    const better = best.diff > 0;
+    box.appendChild(el('div', 'ins-line',
+      `${better ? '↑' : '↓'} Messages ${best.label} got ${pct(best.ra)} replies vs ${pct(best.rb)} ${best.otherLabel} (${best.na} vs ${best.nb} sent).`));
+  } else {
+    box.appendChild(el('div', 'ins-line muted', 'No clear pattern yet. Keep marking replies.'));
+  }
+}
+
+function listOf(items) {
+  if (items.length <= 1) return items[0] || '';
+  return items.slice(0, -1).join(', ') + ' or ' + items[items.length - 1];
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ─── Keyboard ─────────────────────────────────────────────────────────────────

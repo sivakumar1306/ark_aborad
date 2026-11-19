@@ -55,7 +55,8 @@ async function main() {
   // Serve fixtures for linkedin.com URLs.
   await ctx.route('https://www.linkedin.com/**', route => {
     const url = route.request().url();
-    const file = /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
+    if (/\/in\/me\/?$/.test(url)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<script>location.replace("/in/sam-rivera-test/")</script>' });
+    const file = /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
     if (!file) return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>Feed</h1></body></html>' });
     route.fulfill({ status: 200, contentType: 'text/html', body: fs.readFileSync(path.join(__dirname, 'fixtures', file), 'utf8') });
   });
@@ -261,7 +262,10 @@ async function main() {
   console.log('\nSecond profile (p-tag layout)');
   await li.goto('https://www.linkedin.com/in/alex-chen-test/');
   await panel3.click('#tab-compose');
-  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Alex Chen', null, { timeout: 8000 });
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Alex Chen', null, { timeout: 8000 }).catch(async (e) => {
+    console.log('DEBUG', await panel3.textContent('#p-name'), await panel3.textContent('#p-headline'), JSON.stringify(await sw.evaluate(() => Sessions.get('alex-chen-test'))).slice(0, 400));
+    throw e;
+  });
   check('panel follows navigation', true);
   check('message area reset for new person', await panel3.locator('#result.hidden').count() === 1);
   await panel3.click('#opt-format [data-value="inmail"]');
@@ -291,7 +295,110 @@ async function main() {
   await shot('09-error', panel3);
   await sw.evaluate((k) => chrome.storage.local.set({ licenseKey: k }), KEY);
 
-  // ── 11. Dark mode screenshot ─────────────────────────────────────────────
+  // ── 11. Trust layer: import me, common ground, fact check, fix with AI ───
+  console.log('\nImport my LinkedIn');
+  await li.goto('https://www.linkedin.com/in/priya-sharma-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Priya Sharma', null, { timeout: 8000 });
+  check('nudge to import shown', await panel3.isVisible('#ground-nudge'));
+  await panel3.evaluate(() => { document.getElementById('context-box').open = true; });
+  await panel3.fill('#opt-context', '');
+  await panel3.click('#tab-settings');
+  await panel3.click('#import-me');
+  await panel3.waitForSelector('#me-card:not(.hidden)', { timeout: 30000 }).catch(async (e) => {
+    console.log('DEBUG', await panel3.textContent('#toast-text'), ctx.pages().map(p => p.url()));
+    throw e;
+  });
+  check('own profile imported', (await panel3.textContent('#me-name')) === 'Sam Rivera');
+  check('import tab closed again', ctx.pages().every(p => !p.url().includes('sam-rivera')));
+  check('import summary', (await panel3.textContent('#me-meta')).includes('2 schools'));
+  await shot('13-settings-me', panel3);
+
+  console.log('\nCommon ground');
+  await panel3.click('#tab-compose');
+  await panel3.waitForSelector('#ground:not(.hidden)');
+  const ground = await panel3.$$eval('#ground-list .hook > span', xs => xs.map(x => x.textContent));
+  check('shared school found via acronym', ground.includes('You both studied at IIT Bombay'), ground);
+  check('shared company found', ground.some(t => t.includes('Zalando')), ground);
+  check('top 2 preselected', (await panel3.locator('#ground-list input:checked').count()) === 2);
+  check('nudge hidden after import', !(await panel3.isVisible('#ground-nudge')));
+  await panel3.click('#opt-format [data-value="note"]');
+  await panel3.click('#opt-mode [data-value="quick"]');
+  const before = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, before, { timeout: 15000 });
+  log = await (await fetch(`${MOCK}/__log`)).json();
+  const qg = log.filter(l => l.path === '/api/generate/quick').pop().body;
+  check('common ground sent to the writer', /Genuine shared background.*IIT Bombay/.test(qg.instructions), qg.instructions);
+  const mg = await panel3.inputValue('#message');
+  check('message opens with common ground', mg.includes('fellow IIT Bombay alum'), mg);
+
+  console.log('\nFact check');
+  await panel3.waitForFunction(() => /claims? backed/.test(document.getElementById('check-summary').textContent));
+  check('all claims backed on a true message', /All \d+ claims? backed/.test(await panel3.textContent('#check-summary')), await panel3.textContent('#check-summary'));
+  await panel3.click('#check-toggle');
+  const factText = await panel3.textContent('#facts-list');
+  check('shows evidence source', factText.includes('Shared background') || factText.includes('Their'), factText);
+  await shot('14-check-ok', panel3);
+
+  await panel3.evaluate(() => { document.getElementById('context-box').open = true; });
+  await panel3.fill('#opt-context', 'HALLUCINATE');
+  await sleep(500);
+  const b2 = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, b2, { timeout: 15000 });
+  await panel3.waitForFunction(() => document.getElementById('check').dataset.level === 'warn');
+  const summary = await panel3.textContent('#check-summary');
+  check('hallucinated claim flagged in summary', /\d\/\d claims backed/.test(summary), summary);
+  check('panel auto-opens on problems', await panel3.isVisible('#check-body'));
+  const flagged = await panel3.textContent('#facts-list');
+  check('names the unsupported terms', flagged.includes('Google') && flagged.includes('promotion'), flagged);
+  check('inline highlight on the missing term', (await panel3.locator('#msg-backdrop mark.miss').count()) >= 1);
+  check('cliché flagged', (await panel3.textContent('#lint-list')).includes('I came across your profile'));
+  await shot('15-check-flagged', panel3);
+
+  await panel3.fill('#opt-context', '');
+  await sleep(500);
+  const b3 = await panel3.textContent('#v-label');
+  await panel3.click('#fix-ai-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, b3, { timeout: 15000 });
+  log = await (await fetch(`${MOCK}/__log`)).json();
+  const fx = log.filter(l => l.path === '/api/generate/quick').pop().body;
+  check('fix request lists the unsupported sentence', /unsupported claims[\s\S]*promotion to Director at Google/.test(fx.instructions), fx.instructions);
+  check('fix request lists the cliché', /Avoid these clichés[\s\S]*came across your profile/.test(fx.instructions));
+  check('fix request includes the previous draft', /Previous draft: "{3}Hi Priya, congrats/.test(fx.instructions));
+  await panel3.waitForFunction(() => document.getElementById('check').dataset.level === 'ok', null, { timeout: 5000 }).catch(() => {});
+  check('fixed version passes the check', (await panel3.evaluate(() => document.getElementById('check').dataset.level)) === 'ok', await panel3.textContent('#check-summary'));
+  await shot('16-check-fixed', panel3);
+
+  // Typing a false claim re-checks live.
+  await panel3.click('#message');
+  await panel3.keyboard.press('Control+End');
+  await panel3.keyboard.type(' Congrats on the IPO at Meta!');
+  await panel3.waitForFunction(() => /Meta/.test(document.getElementById('facts-list').textContent), null, { timeout: 3000 });
+  check('live re-check while editing', true);
+
+  console.log('\nSelf profile');
+  await li.goto('https://www.linkedin.com/in/sam-rivera-test/');
+  await panel3.waitForSelector('#self-banner:not(.hidden)', { timeout: 8000 });
+  check('own profile recognised', true);
+  check('no common ground with yourself', (await panel3.locator('#ground.hidden').count()) === 1);
+
+  console.log('\nInsights');
+  await sw.evaluate(async () => {
+    const mk = (id, status, common) => ({ id, name: id, status, profileUrl: '', message: 'x', format: 'note', updatedAt: Date.now(), signals: { common, mode: 'quick', format: 'note', tone: 'Neutral' } });
+    const items = await ContactStore.list();
+    await chrome.storage.local.set({ contacts: [...items,
+      mk('a', 'replied', 1), mk('b', 'replied', 2), mk('c', 'sent', 1),
+      mk('d', 'sent', 0), mk('e', 'sent', 0), mk('f', 'replied', 0)] });
+  });
+  await panel3.click('#tab-tracker');
+  await panel3.waitForSelector('#insights:not(.hidden) .ins-big');
+  const ins = await panel3.textContent('#insights');
+  check('reply rate shown', ins.includes('reply rate'), ins);
+  check('surfaces what works (common ground)', /with common ground got 50% replies vs 33% without \(4 vs 3 sent\)/.test(ins), ins);
+  await shot('17-insights', panel3);
+
+  // ── 12. Dark mode screenshot ─────────────────────────────────────────────
   if (SHOTS) {
     await panel3.click('#tab-settings');
     await panel3.click('#set-theme [data-value="dark"]');

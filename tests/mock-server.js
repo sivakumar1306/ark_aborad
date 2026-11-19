@@ -19,6 +19,20 @@ function messageFor(body, kind) {
   const company = p.currentCompany ? ` at ${p.currentCompany}` : '';
   const shorter = /shorter/i.test(body.instructions || '');
   const long = /LONG/.test(body.userBio || '');
+  const revising = /Revise the previous draft/.test(body.instructions || '');
+  const common = /Open with the strongest one, naturally: ([^;\n]+?)(?:;|\.\n|\.$)/.exec(body.instructions || '');
+  const school = common && /studied at (.+)$/.exec(common[1]);
+
+  // Simulate a model hallucination the fact check should catch.
+  if (/HALLUCINATE/.test(body.userBio || '') && !revising) {
+    return `Hi ${first}, congrats on your recent promotion to Director at Google! I came across your profile and loved${role}${company}. Would you be open to a quick chat?`;
+  }
+  if (revising) {
+    return `Hi ${first}, loved${role}${company}.${hook ? hook.slice(0, 70) : ''} Would you be open to a quick chat about how your team works?`.slice(0, 199);
+  }
+  if (school && body.format === 'note') {
+    return `Hi ${first}, fellow ${school[1]} alum here! Loved${role}${company}. Would you be open to connecting?`;
+  }
 
   switch (body.format) {
     case 'inmail':

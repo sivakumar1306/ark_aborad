@@ -1,14 +1,64 @@
 # LinkedIn Outreach AI — v4
 
-Improvements to the Ark Abroad LinkedIn outreach extension. Same product, same server and API, same license keys. It now lives where the work happens, it doesn't lose your work, and it helps you *send* the message, not just write it.
+Improvements to the Ark Abroad LinkedIn outreach extension. Same product, same server and API, same license keys.
+
+**The headline:** AI outreach fails in two ways. It's *generic*, or it's *wrong*: a confident made-up "congrats on the promotion!" sent to a stranger under your name. v4 adds a **trust layer** that checks every claim in a message against what was actually read, before you hit Send. It also finds the real common ground between you and the person you're writing to.
 
 <p>
-  <img src="docs/screenshots/03-quick-result.png" width="260" alt="Compose view with a generated connection note">
-  <img src="docs/screenshots/05-deep-hooks.png" width="260" alt="Deep mode with selectable hooks">
-  <img src="docs/screenshots/08-tracker.png" width="260" alt="Tracker with follow-up due">
+  <img src="docs/screenshots/15-check-flagged.png" width="260" alt="Fact check flagging an invented promotion">
+  <img src="docs/screenshots/14-check-ok.png" width="260" alt="Message opening with verified common ground">
+  <img src="docs/screenshots/17-insights.png" width="260" alt="Tracker insights: what gets replies">
 </p>
 
-## What changed, and why
+## The trust layer
+
+### Fact check, every sentence
+After generation, each sentence is checked against the sources the extension holds:
+- their profile
+- Deep Mode research
+- shared background
+- your own bio and profile
+
+The check pulls out *checkable claims*: names (companies, schools, events, titles), numbers, and event words (promotion, funding, talk, hiring, launch…). It then looks each one up in those sources.
+- **Backed**: highlighted green inside the message, with the evidence shown. *"Their recent post: Slides from my PyData Berlin talk…"*
+- **Not found**: highlighted amber, with the exact words underlined. *"Couldn't find "Director", "Google" or "promotion" in their profile or the research. Check before sending."*
+- **Claims about you** ("I spoke at NeurIPS") are checked against *your* bio and profile only.
+- It re-checks live as you edit.
+
+It runs **locally, instantly, with no extra AI call**, so it costs nothing per message. It's a heuristic and labelled as one: it flags things for a human to check; it doesn't judge truth.
+
+### Fix with AI
+One click sends a revision request that lists exactly what to fix:
+- the unsupported sentences
+- the clichés found
+- a missing question to them
+- a wrong first name in the greeting
+
+The previous draft goes along with it. The revised version is checked again. Every request now also carries a standing rule: *only state facts that appear in the data provided.*
+
+### Common ground
+**Import my LinkedIn** opens your own profile for a few seconds, reads it, and closes it. It also fills in your name and bio. Then every profile shows what you actually share:
+- the same school, including acronyms ("IIT Bombay" ↔ "Indian Institute of Technology Bombay")
+- the same past or current company
+- the same city
+- shared skills
+
+Each item is a hook you can tick, it works in Quick mode, and it's verified from both profiles, so the fact check can back it up.
+
+### Writing check
+Flags:
+- placeholders (`[Name]`)
+- greeting the wrong person
+- clichés ("I came across your profile")
+- nothing specific about them
+- no ask
+- mostly about you
+- a missing subject line for InMail or email
+
+### Insights: what gets replies
+Each tracked message records how it was written (common ground or not, Quick or Deep, format, tone). Once you've marked a few as sent and replied, the Tracker shows your reply rate and the strongest pattern. For example: *"Messages with common ground got 50% replies vs 33% without."*
+
+## Everything else that changed, and why
 
 ### 1. It stopped losing work
 **Before:** the UI was a popup. Clicking back on LinkedIn closed it, and a ~20-second Deep Mode run vanished along with the result.
@@ -61,6 +111,9 @@ linkedin extention/
     session.js       per-profile working state in chrome.storage.session
     formats.js       Note/DM/InMail/Email rules, the writing brief, meter, trim
     contacts.js      tracker store (migrates v3 "recentContacts" automatically)
+    grounding.js     fact check: claims → evidence, sentence offsets for highlighting
+    common.js        common ground: fuzzy org/school matching incl. acronyms
+    lint.js          writing check (clichés, placeholders, wrong name, no ask…)
 ```
 
 **No backend changes were needed.** The server's API has no notion of formats, so the requirements travel as a short written brief appended to the sender bio, which the server already gives the model. The request also carries explicit `format`, `maxChars` and `instructions` fields, ready for when the server reads them. Hook selection works by filtering `enrichmentJSON.topHooks` before it goes back to `/api/generate/deep`.
@@ -72,19 +125,26 @@ linkedin extention/
 
 ## Tests
 
-`tests/e2e.js` loads the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Ark API (`tests/mock-server.js`). It covers 52 checks:
-- onboarding and key validation
-- scraping both page layouts
-- quick and deep generation
-- LinkedIn swapping pages before the content updates
-- closing the panel mid-run
-- hook selection
-- the 200/300 limits and trimming
-- inserting into the invite note and the message box
-- tracker, follow-ups and CSV export
-- retry after a 502, and auth errors
+- **`tests/unit.js`**: 36 checks on the trust layer, covering true messages with no false alarms, invented claims, sender claims, acronyms, and the lint rules.
+- **`tests/e2e.js`**: 78 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Ark API (`tests/mock-server.js`). They cover:
+  - onboarding and key validation
+  - scraping both page layouts
+  - LinkedIn swapping pages before the content updates
+  - quick and deep generation
+  - closing the panel mid-run
+  - hook selection
+  - the 200/300 limits and trimming
+  - inserting into the invite note and the message box
+  - tracker, follow-ups and CSV export
+  - retry after a 502, and auth errors
+  - importing your profile
+  - common ground
+  - a simulated hallucination caught, then fixed with AI
+  - live re-check while editing
+  - insights
 
 ```bash
-node tests/e2e.js            # run (needs Playwright + Chromium)
+node tests/unit.js
+node tests/e2e.js            # needs Playwright + Chromium
 SHOTS=1 node tests/e2e.js    # also regenerate docs/screenshots/
 ```

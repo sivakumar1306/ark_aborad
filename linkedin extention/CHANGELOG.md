@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.0: Trust layer
+
+- **Fact check:** every sentence's claims (names, numbers, events) are checked against the profile, research, shared background and your own data. Highlights appear inside the message, with sources; re-checks run live while editing.
+- **Fix with AI:** revises the draft, listing exactly which claims, clichés and issues to fix.
+- **Common ground:** "Import my LinkedIn" reads your profile (and fills in your name and bio). Shared schools (acronym-aware), companies, city and skills become selectable hooks.
+- **Writing check:** placeholders, wrong name, clichés, nothing specific, no ask, mostly-about-you, missing subject.
+- **Insights:** reply rate and the strongest pattern across how messages were written.
+- Every request now includes a "never invent facts" rule.
+- Fixed: the panel sometimes missed a profile when the load-complete event raced the URL change.
+
 ## 4.0.0
 
 **Workflow**

@@ -29,7 +29,7 @@ const Formats = (() => {
 
   function list() { return Object.values(DEFS); }
 
-  function brief({ format, context, shorten, previous, noteLimit, hooks }) {
+  function brief({ format, context, shorten, previous, noteLimit, hooks, commonGround, revise }) {
     const f = get(format, { noteLimit });
     const lines = [`Output format: ${f.name}.`];
     if (f.id === 'note') {
@@ -40,7 +40,18 @@ const Formats = (() => {
       lines.push(`Keep it under ${f.target} characters. No subject line, no placeholders.`);
     }
     if (hooks === 0) lines.push('Do not reference company news or recent events.');
+    if (commonGround && commonGround.length) {
+      lines.push(`Genuine shared background between sender and recipient (verified from both profiles). Open with the strongest one, naturally: ${commonGround.join('; ')}.`);
+    }
     if (context && context.trim()) lines.push(`Extra context from the sender. Use it naturally and accurately: ${context.trim()}`);
+    lines.push('Only state facts that appear in the profile, research or sender details provided. Never invent promotions, funding, talks, numbers or titles.');
+    if (revise && previous) {
+      const fixes = [];
+      if (revise.unverified?.length) fixes.push(`Remove or rephrase these unsupported claims (they are not in the data provided): ${revise.unverified.map(x => `"${x}"`).join(', ')}.`);
+      if (revise.cliches?.length) fixes.push(`Avoid these clichés: ${revise.cliches.join(', ')}.`);
+      if (revise.other?.length) fixes.push(...revise.other);
+      lines.push(`Revise the previous draft. Keep what works and fix exactly this:\n- ${fixes.join('\n- ')}\nPrevious draft: """${previous.slice(0, 1500)}"""`);
+    }
     if (shorten) {
       const goal = Math.round((f.id === 'note' ? f.limit : f.target) * 0.75);
       lines.push(`The previous draft was too long. Write a clearly shorter version (aim for about ${goal} characters)` +

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Outreach AI",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Personalised LinkedIn outreach from the profile you're viewing. Side panel, one-click insert, follow-up tracker. Requires a license key.",
   "minimum_chrome_version": "116",
   "permissions": [

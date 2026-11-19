@@ -7,7 +7,7 @@
 // that state, so closing it mid-run loses nothing. All AI happens server-side;
 // the extension only sends profile data + the license key.
 
-importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js');
+importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
 const SETTINGS_KEYS  = ['licenseKey', 'userName', 'userBio', 'resumeBase64', 'license', 'noteLimit', 'followUpDays'];
@@ -73,6 +73,7 @@ const HANDLERS = {
   PATCH_SESSION:   (m) => patchSession(m),
   VALIDATE_KEY:    (m) => validateKey(m.key),
   INSERT:          (m) => insertIntoPage(m),
+  IMPORT_ME:       (m) => importMyProfile(m),
   CONTACT_STATUS:  async (m) => { const s = await getSettings(); const c = await ContactStore.setStatus(m.id, m.status, s.followUpDays ?? 5); refreshBadge(); return { contact: c }; },
   CONTACT_DELETE:  async (m) => { await ContactStore.remove(m.id); refreshBadge(); },
   CONTACTS_CLEAR:  async ()  => { await ContactStore.clear(); refreshBadge(); }
@@ -174,9 +175,11 @@ async function write(key, options = {}, settings) {
     format:    options.format,
     context:   s.context,
     shorten:   options.shorten,
-    previous:  options.shorten ? current?.text : null,
+    previous:  options.shorten || options.revise ? (options.previous || current?.text) : null,
     noteLimit: settings.noteLimit || 300,
-    hooks:     useDeep ? hooks.length : undefined
+    hooks:     useDeep ? hooks.length : undefined,
+    commonGround: options.commonGround,
+    revise:    options.revise
   });
   const f = Formats.get(options.format, { noteLimit: settings.noteLimit || 300 });
 
@@ -214,6 +217,8 @@ async function write(key, options = {}, settings) {
       purpose: common.messageType, tone: common.tone,
       mode: useDeep ? 'deep' : 'quick',
       hooks: useDeep ? hooks : [],
+      commonGround: options.commonGround || [],
+      revised: !!options.revise,
       createdAt: Date.now()
     });
     if (x.versions.length > 12) x.versions.shift();
@@ -233,7 +238,14 @@ async function write(key, options = {}, settings) {
     headline:   p.headline || '',
     company:    p.currentCompany || '',
     message:    text,
-    format:     f.id
+    format:     f.id,
+    signals: {
+      mode:   useDeep ? 'deep' : 'quick',
+      format: f.id,
+      tone:   common.tone,
+      hooks:  useDeep ? hooks.length : 0,
+      common: (options.commonGround || []).length
+    }
   });
 }
 
@@ -270,7 +282,7 @@ function nonEmpty(obj) {
 }
 
 // ─── Session patches from the panel (UI-owned fields only) ────────────────────
-const PATCHABLE = ['edits', 'context', 'hooks', 'versions', 'active'];
+const PATCHABLE = ['edits', 'context', 'hooks', 'versions', 'active', 'commonPicks', 'checks'];
 
 async function patchSession({ key, patch }) {
   if (!key || !patch) return;
@@ -328,6 +340,55 @@ async function sendToTab(tabId, msg) {
 async function insertIntoPage({ tabId, text }) {
   const res = await sendToTab(tabId, { action: 'insertMessage', text });
   return { result: res || { success: false } };
+}
+
+// ─── Your own profile (for common ground + fact-checking claims about you) ────
+// linkedin.com/in/me/ redirects to the signed-in user's profile. Open it briefly
+// in the foreground (lazy sections only render in a visible tab), read it, close it.
+async function importMyProfile({ returnTabId, useTabId }) {
+  let tabId = useTabId;
+  let created = null;
+  if (!tabId) {
+    created = await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/', active: true });
+    tabId = created.id;
+  }
+  try {
+    const tab = await waitForTab(tabId, 25000);
+    const key = Sessions.keyFromUrl(tab.url);
+    if (!key || key === 'me') throw new Error('Couldn’t open your profile. Are you signed in to LinkedIn?');
+    const profile = await scrapeTab(tabId, { full: true });
+    const me = { ...profile, importedAt: Date.now() };
+    const cur = await chrome.storage.local.get(['userName', 'userBio']);
+    const save = { myProfile: me };
+    if (!cur.userName && me.name) save.userName = me.name;
+    if (!cur.userBio) save.userBio = bioFrom(me);
+    await chrome.storage.local.set(save);
+    return { profile: me, filledName: !!save.userName, filledBio: !!save.userBio };
+  } finally {
+    if (created) chrome.tabs.remove(created.id).catch(() => {});
+    if (returnTabId) chrome.tabs.update(returnTabId, { active: true }).catch(() => {});
+  }
+}
+
+async function waitForTab(tabId, timeout) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (!t) throw new Error('The LinkedIn tab was closed.');
+    if (/\/(login|authwall|checkpoint|uas\/login)/.test(t.url || '')) throw new Error('Sign in to LinkedIn first, then try again.');
+    const key = Sessions.keyFromUrl(t.url);
+    if (t.status === 'complete' && key && key !== 'me') return t;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error('LinkedIn took too long to load your profile.');
+}
+
+function bioFrom(p) {
+  const parts = [];
+  if (p.headline) parts.push(p.headline.replace(/\s*\|\s*/g, ', '));
+  const firstSentences = (p.about || '').split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
+  if (firstSentences) parts.push(firstSentences);
+  return parts.join('. ').replace(/\.\./g, '.').slice(0, 400);
 }
 
 // ─── License ──────────────────────────────────────────────────────────────────
