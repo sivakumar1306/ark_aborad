@@ -1,13 +1,18 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Outreach AI",
-  "version": "3.0.2",
-  "description": "AI-powered LinkedIn outreach message generator. Requires a license key.",
+  "version": "4.0.0",
+  "description": "Personalised LinkedIn outreach from the profile you're viewing. Side panel, one-click insert, follow-up tracker. Requires a license key.",
+  "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "sidePanel",
+    "contextMenus",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
@@ -17,8 +22,21 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "LinkedIn Outreach AI"
+    "default_title": "Outreach AI (Alt+Shift+O)",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "open-panel": {
+      "suggested_key": { "default": "Alt+Shift+O" },
+      "description": "Open the Outreach AI side panel"
+    }
   },
   "content_scripts": [
     {

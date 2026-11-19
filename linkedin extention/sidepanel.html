@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Outreach AI</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="app-header">
+      <div class="brand">
+        <svg class="brand-mark" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M2 8H22" stroke="currentColor" stroke-width="2"/>
+          <path d="M6 14H10M14 14H18M6 17H8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h1 class="brand-name">Outreach AI</h1>
+      </div>
+      <button class="quota-chip" id="quota-chip" type="button"></button>
+    </header>
+
+    <nav class="tab-nav" role="tablist" aria-label="Sections">
+      <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="compose"  id="tab-compose">Compose</button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="tracker"  id="tab-tracker">Tracker <span class="tab-badge hidden" id="due-badge"></span></button>
+      <button class="tab-btn"        role="tab" aria-selected="false" data-tab="settings" id="tab-settings">Settings</button>
+    </nav>
+
+    <main class="views">
+
+      <!-- ═══ COMPOSE ═══ -->
+      <section class="view active" id="view-compose" role="tabpanel" aria-labelledby="tab-compose">
+
+        <div class="banner banner-warn hidden" id="no-key-banner">
+          <span>Add your license key to start writing.</span>
+          <button class="link" type="button" data-goto="settings">Open Settings →</button>
+        </div>
+
+        <div class="empty-state hidden" id="no-profile">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h2>Open a LinkedIn profile</h2>
+          <p>Go to any <code>linkedin.com/in/…</code> page. This panel follows you as you browse, so keep it open.</p>
+        </div>
+
+        <div class="hidden" id="compose">
+
+          <article class="profile-card" id="profile-card" aria-live="polite">
+            <div class="avatar" id="p-avatar">?</div>
+            <div class="profile-main">
+              <div class="profile-name" id="p-name"></div>
+              <div class="profile-headline" id="p-headline"></div>
+              <div class="profile-meta" id="p-meta"></div>
+            </div>
+            <button class="icon-btn" id="refresh-profile" type="button" title="Re-read this profile" aria-label="Re-read this profile">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            </button>
+          </article>
+
+          <details class="review" id="review">
+            <summary>
+              <span class="quality" id="p-quality"></span>
+              <span class="review-cta">Review &amp; edit</span>
+            </summary>
+            <div class="review-body">
+              <p class="hint">Fix anything that looks off. Better input, better message. Edits apply to this person only.</p>
+              <label class="field"><span class="field-label">Headline</span><input class="input" data-edit="headline" /></label>
+              <div class="row-2">
+                <label class="field"><span class="field-label">Current role</span><input class="input" data-edit="currentTitle" /></label>
+                <label class="field"><span class="field-label">Company</span><input class="input" data-edit="currentCompany" /></label>
+              </div>
+              <label class="field"><span class="field-label">Location</span><input class="input" data-edit="location" /></label>
+              <label class="field"><span class="field-label">About</span><textarea class="input" rows="3" data-edit="about"></textarea></label>
+              <label class="field"><span class="field-label">Recent posts <span class="muted">(one per line)</span></span><textarea class="input" rows="3" data-edit="recentPosts" data-list="1"></textarea></label>
+              <label class="field"><span class="field-label">Skills <span class="muted">(comma separated)</span></span><input class="input" data-edit="skills" data-list="," /></label>
+            </div>
+          </details>
+
+          <div class="options">
+            <label class="field">
+              <span class="field-label">Purpose</span>
+              <select id="opt-purpose" class="input select">
+                <option value="Networking">Networking</option>
+                <option value="Job">Job opportunity</option>
+                <option value="Referral">Referral request</option>
+                <option value="Collaboration">Collaboration</option>
+              </select>
+            </label>
+
+            <div class="field">
+              <span class="field-label" id="lbl-format">Send as</span>
+              <div class="segmented" id="opt-format" role="radiogroup" aria-labelledby="lbl-format"></div>
+              <div class="hint" id="format-hint"></div>
+            </div>
+
+            <div class="row-2">
+              <div class="field">
+                <span class="field-label" id="lbl-tone">Tone</span>
+                <div class="segmented" id="opt-tone" role="radiogroup" aria-labelledby="lbl-tone">
+                  <button type="button" role="radio" data-value="Formal">Formal</button>
+                  <button type="button" role="radio" data-value="Neutral">Neutral</button>
+                  <button type="button" role="radio" data-value="Casual">Casual</button>
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label" id="lbl-mode">Research</span>
+                <div class="segmented" id="opt-mode" role="radiogroup" aria-labelledby="lbl-mode">
+                  <button type="button" role="radio" data-value="quick" title="Uses the profile only. Fast.">Quick</button>
+                  <button type="button" role="radio" data-value="deep" title="Also researches company news and public work. ~20s.">Deep</button>
+                </div>
+              </div>
+            </div>
+
+            <details class="context" id="context-box">
+              <summary>Add context <span class="muted">(optional)</span><span class="context-dot hidden" id="context-dot"></span></summary>
+              <textarea id="opt-context" class="input" rows="2" placeholder="e.g. We met at PyCon last week. I'm applying for the Data Analyst role."></textarea>
+            </details>
+          </div>
+
+          <ol class="stepper hidden" id="stepper" aria-label="Progress">
+            <li class="step" data-step="read"><span class="dot"></span>Read profile</li>
+            <li class="step" data-step="research"><span class="dot"></span>Research</li>
+            <li class="step" data-step="write"><span class="dot"></span>Write</li>
+          </ol>
+          <div class="step-note hidden" id="step-note"></div>
+
+          <div class="hooks hidden" id="hooks">
+            <div class="hooks-head">
+              <span class="hooks-title">Hooks found</span>
+              <span class="muted">Tick what to mention</span>
+            </div>
+            <div id="hooks-list"></div>
+          </div>
+
+          <div class="banner banner-error hidden" id="error-banner" role="alert">
+            <span id="error-text"></span>
+            <button class="link" type="button" id="error-action">Try again</button>
+          </div>
+
+          <button class="btn btn-primary btn-block" id="primary-btn" type="button">
+            <span class="spinner hidden" id="primary-spinner"></span>
+            <span id="primary-label">Generate message</span>
+            <kbd class="kbd" aria-hidden="true">Ctrl ↵</kbd>
+          </button>
+
+          <section class="result hidden" id="result" aria-label="Generated message">
+            <div class="result-head">
+              <span class="result-title" id="result-title">Message</span>
+              <div class="versions" id="versions">
+                <button class="icon-btn sm" id="v-prev" type="button" aria-label="Previous version">‹</button>
+                <span id="v-label" class="v-label"></span>
+                <button class="icon-btn sm" id="v-next" type="button" aria-label="Next version">›</button>
+              </div>
+            </div>
+            <textarea id="message" class="message" spellcheck="true" aria-label="Message text (editable)"></textarea>
+            <div class="meter" id="meter">
+              <div class="meter-bar"><span id="meter-fill"></span></div>
+              <span class="meter-text" id="meter-text"></span>
+            </div>
+            <div class="fix-row hidden" id="fix-row">
+              <span id="fix-text"></span>
+              <span class="fix-actions">
+                <button class="link" type="button" id="fit-btn">Trim to fit</button>
+                <button class="link" type="button" id="shorten-btn">Rewrite shorter</button>
+              </span>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary grow" id="insert-btn" type="button" title="Put this into LinkedIn's note or message box. You still press Send.">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                Insert into LinkedIn
+              </button>
+              <button class="btn btn-secondary" id="copy-btn" type="button" title="Copy (Ctrl+Shift+C)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2"/></svg>
+                <span id="copy-label">Copy</span>
+              </button>
+              <button class="btn btn-secondary icon-only" id="regen-btn" type="button" title="Write another version" aria-label="Write another version">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+              </button>
+            </div>
+            <div class="sent-row" id="sent-row">
+              <span id="sent-text" class="muted"></span>
+              <button class="link" type="button" id="mark-sent-btn">Mark as sent</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ═══ TRACKER ═══ -->
+      <section class="view" id="view-tracker" role="tabpanel" aria-labelledby="tab-tracker">
+        <div class="tracker-tools">
+          <input type="search" id="t-search" class="input" placeholder="Search name, company or message" aria-label="Search contacts" />
+          <div class="chips" id="t-filters" role="radiogroup" aria-label="Filter by status">
+            <button type="button" class="chip active" data-filter="all">All</button>
+            <button type="button" class="chip" data-filter="drafted">Drafted</button>
+            <button type="button" class="chip" data-filter="sent">Sent</button>
+            <button type="button" class="chip" data-filter="due">Follow up</button>
+            <button type="button" class="chip" data-filter="replied">Replied</button>
+          </div>
+        </div>
+        <div id="t-list"></div>
+        <div class="empty-state hidden" id="t-empty">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <p id="t-empty-text">No one here yet.</p>
+          <p class="hint">Everyone you write to shows up here so you can track replies and follow-ups.</p>
+        </div>
+        <footer class="tracker-foot hidden" id="t-foot">
+          <span class="muted" id="t-count"></span>
+          <span>
+            <button class="link" type="button" id="t-export">Export CSV</button>
+            <button class="link danger" type="button" id="t-clear">Clear all</button>
+          </span>
+        </footer>
+      </section>
+
+      <!-- ═══ SETTINGS ═══ -->
+      <section class="view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings">
+        <div class="settings">
+
+          <div class="card card-accent">
+            <label class="field-label" for="license-key">License key</label>
+            <div class="key-row">
+              <input id="license-key" class="input mono" type="text" placeholder="ARK-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
+              <button class="btn btn-primary" id="validate-btn" type="button">Verify</button>
+            </div>
+            <div class="key-status hidden" id="key-status" role="status"></div>
+            <p class="hint">Provided by your account manager.</p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">About you <span class="muted">· used to personalise every message</span></div>
+            <label class="field"><span class="field-label">Your name</span><input id="user-name" class="input" type="text" placeholder="Jane Smith" autocomplete="name" /></label>
+            <label class="field">
+              <span class="field-label">Your bio <span class="muted" id="bio-count"></span></span>
+              <textarea id="user-bio" class="input" rows="3" placeholder="Final-year CS student into ML infra. Built X, interned at Y. Looking for Z."></textarea>
+            </label>
+            <div class="field">
+              <span class="field-label">Resume (PDF, optional)</span>
+              <div class="file-drop" id="file-drop" tabindex="0" role="button" aria-label="Upload resume PDF">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span id="file-label">Click or drop a PDF (max 4 MB)</span>
+                <input id="resume-upload" type="file" accept="application/pdf,.pdf" class="hidden" />
+              </div>
+              <div class="file-row hidden" id="file-row">
+                <span id="file-status"></span>
+                <button class="link danger" type="button" id="resume-remove">Remove</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Preferences</div>
+            <div class="field">
+              <span class="field-label" id="lbl-note">LinkedIn account</span>
+              <div class="segmented" id="set-note-limit" role="radiogroup" aria-labelledby="lbl-note">
+                <button type="button" role="radio" data-value="200">Free · 200-char notes</button>
+                <button type="button" role="radio" data-value="300">Premium · 300</button>
+              </div>
+            </div>
+            <label class="field">
+              <span class="field-label">Follow-up reminder</span>
+              <select id="set-followup" class="input select">
+                <option value="3">3 days after sending</option>
+                <option value="5">5 days after sending</option>
+                <option value="7">7 days after sending</option>
+                <option value="14">14 days after sending</option>
+                <option value="0">Off</option>
+              </select>
+            </label>
+            <div class="field">
+              <span class="field-label" id="lbl-theme">Theme</span>
+              <div class="segmented" id="set-theme" role="radiogroup" aria-labelledby="lbl-theme">
+                <button type="button" role="radio" data-value="system">System</button>
+                <button type="button" role="radio" data-value="light">Light</button>
+                <button type="button" role="radio" data-value="dark">Dark</button>
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="set-fab" />
+              <span>Show “Write outreach” button on LinkedIn profiles</span>
+            </label>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Shortcuts</div>
+            <dl class="shortcuts">
+              <dt><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></dt><dd>Open this panel</dd>
+              <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>Generate / write</dd>
+              <dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></dt><dd>Copy message</dd>
+              <dt><kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd></dt><dd>Previous / next version</dd>
+            </dl>
+          </div>
+
+          <p class="settings-note">Settings save automatically and stay on this device. Profile data is sent to our server only when you generate a message.</p>
+          <div class="saved-indicator" id="saved-indicator" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ═══ ONBOARDING ═══ -->
+    <div class="onboarding hidden" id="onboarding" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+      <div class="ob-card">
+        <div class="ob-step" data-ob="1">
+          <div class="ob-icon">✦</div>
+          <h2 id="ob-title">Welcome to Outreach AI</h2>
+          <p>Personalised LinkedIn messages written from the profile you’re looking at, plus a tracker so nobody slips through the cracks.</p>
+          <label class="field-label" for="ob-key">Your license key</label>
+          <div class="key-row">
+            <input id="ob-key" class="input mono" placeholder="ARK-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-primary" id="ob-verify" type="button">Verify</button>
+          </div>
+          <div class="key-status hidden" id="ob-key-status" role="status"></div>
+        </div>
+        <div class="ob-step hidden" data-ob="2">
+          <div class="ob-icon">✎</div>
+          <h2>A little about you</h2>
+          <p>Every message is written in your voice, from your background.</p>
+          <label class="field"><span class="field-label">Your name</span><input id="ob-name" class="input" autocomplete="name" placeholder="Jane Smith" /></label>
+          <label class="field"><span class="field-label">One-line bio</span><textarea id="ob-bio" class="input" rows="3" placeholder="Final-year CS student into ML infra. Looking for summer internships."></textarea></label>
+          <button class="btn btn-primary btn-block" id="ob-next" type="button">Continue</button>
+        </div>
+        <div class="ob-step hidden" data-ob="3">
+          <div class="ob-icon">✓</div>
+          <h2>You’re set</h2>
+          <ol class="ob-list">
+            <li>Open any LinkedIn profile. This panel picks it up automatically.</li>
+            <li>Choose <b>Note</b>, <b>DM</b>, <b>InMail</b> or <b>Email</b> and hit <kbd>Ctrl</kbd>+<kbd>Enter</kbd>.</li>
+            <li><b>Insert into LinkedIn</b>, review, press Send yourself.</li>
+          </ol>
+          <button class="btn btn-primary btn-block" id="ob-done" type="button">Start writing</button>
+        </div>
+        <div class="ob-foot">
+          <div class="ob-dots"><span class="active"></span><span></span><span></span></div>
+          <button class="link muted" type="button" id="ob-skip">Skip for now</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"><span id="toast-text"></span><button class="link" type="button" id="toast-action"></button></div>
+  </div>
+
+  <script src="utils/session.js"></script>
+  <script src="utils/formats.js"></script>
+  <script src="utils/contacts.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
