@@ -18,7 +18,7 @@
         </svg>
         <h1 class="brand-name">Outreach AI</h1>
       </div>
-      <button class="quota-chip" id="quota-chip" type="button"></button>
+      <button class="status-chip" id="mode-chip" type="button"></button>
     </header>
 
     <nav class="tab-nav" role="tablist" aria-label="Sections">
@@ -31,11 +31,6 @@
 
       <!-- ═══ COMPOSE ═══ -->
       <section class="view active" id="view-compose" role="tabpanel" aria-labelledby="tab-compose">
-
-        <div class="banner banner-warn hidden" id="no-key-banner">
-          <span>Add your license key to start writing.</span>
-          <button class="link" type="button" data-goto="settings">Open Settings →</button>
-        </div>
 
         <div class="empty-state hidden" id="no-profile">
           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -123,10 +118,11 @@
                 <span class="field-label" id="lbl-mode">Research</span>
                 <div class="segmented" id="opt-mode" role="radiogroup" aria-labelledby="lbl-mode">
                   <button type="button" role="radio" data-value="quick" title="Uses the profile only. Fast.">Quick</button>
-                  <button type="button" role="radio" data-value="deep" title="Also researches company news and public work. ~20s.">Deep</button>
+                  <button type="button" role="radio" data-value="deep" title="Finds more hooks: web research with an API key, profile hooks without.">Deep</button>
                 </div>
               </div>
             </div>
+            <div class="hint mode-hint" id="mode-hint"></div>
 
             <details class="context" id="context-box">
               <summary>Add context <span class="muted">(optional)</span><span class="context-dot hidden" id="context-dot"></span></summary>
@@ -151,7 +147,10 @@
 
           <div class="banner banner-error hidden" id="error-banner" role="alert">
             <span id="error-text"></span>
-            <button class="link" type="button" id="error-action">Try again</button>
+            <span class="error-actions">
+              <button class="link" type="button" id="error-free">Write in free mode</button>
+              <button class="link" type="button" id="error-action">Try again</button>
+            </span>
           </div>
 
           <button class="btn btn-primary btn-block" id="primary-btn" type="button">
@@ -259,13 +258,25 @@
         <div class="settings">
 
           <div class="card card-accent">
-            <label class="field-label" for="license-key">License key</label>
+            <div class="card-title">How messages are written</div>
+            <div class="engine-state" id="engine-state"></div>
+            <label class="field-label" for="api-key">Anthropic API key <span class="muted">(optional)</span></label>
             <div class="key-row">
-              <input id="license-key" class="input mono" type="text" placeholder="ARK-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
-              <button class="btn btn-primary" id="validate-btn" type="button">Verify</button>
+              <input id="api-key" class="input mono-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+              <button class="icon-btn" id="key-show" type="button" aria-label="Show key" title="Show / hide">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+              <button class="btn btn-primary" id="test-key-btn" type="button">Test</button>
             </div>
             <div class="key-status hidden" id="key-status" role="status"></div>
-            <p class="hint">Provided by your account manager.</p>
+            <label class="field" style="margin-top:10px">
+              <span class="field-label">Claude model</span>
+              <select id="set-model" class="input select">
+                <option value="claude-haiku-5-5">Haiku 5.5 · fastest, under $0.001 per message</option>
+                <option value="claude-sonnet-5-5">Sonnet 5.5 · stronger writing, about $0.01 per message</option>
+              </select>
+            </label>
+            <p class="hint">No key? Messages are written on your device for free. With a key, Claude writes them and Deep mode searches the web. Your key stays on this device and is only ever sent to api.anthropic.com. <button class="link danger hidden" type="button" id="remove-key">Remove key</button></p>
           </div>
 
           <div class="card">
@@ -365,13 +376,22 @@
         <div class="ob-step" data-ob="1">
           <div class="ob-icon">✦</div>
           <h2 id="ob-title">Welcome to Outreach AI</h2>
-          <p>Personalised LinkedIn messages written from the profile you’re looking at, plus a tracker so nobody slips through the cracks.</p>
-          <label class="field-label" for="ob-key">Your license key</label>
-          <div class="key-row">
-            <input id="ob-key" class="input mono" placeholder="ARK-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
-            <button class="btn btn-primary" id="ob-verify" type="button">Verify</button>
+          <p>Personalised LinkedIn messages from the profile you’re looking at. Every claim is fact-checked before you send it.</p>
+          <div class="ob-choices">
+            <button class="ob-choice" type="button" id="ob-free">
+              <b>Start free</b>
+              <span>Written on your device from their profile. No key, no cost.</span>
+            </button>
+            <div class="ob-choice">
+              <b>Use my Anthropic API key</b>
+              <span>Claude writes each message (under $0.001) and Deep mode searches the web.</span>
+              <div class="key-row">
+                <input id="ob-key" class="input mono-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+                <button class="btn btn-primary" id="ob-test" type="button">Test</button>
+              </div>
+              <div class="key-status hidden" id="ob-key-status" role="status"></div>
+            </div>
           </div>
-          <div class="key-status hidden" id="ob-key-status" role="status"></div>
         </div>
         <div class="ob-step hidden" data-ob="2">
           <div class="ob-icon">✎</div>
@@ -409,6 +429,7 @@
   <script src="utils/grounding.js"></script>
   <script src="utils/common.js"></script>
   <script src="utils/lint.js"></script>
+  <script src="utils/api.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

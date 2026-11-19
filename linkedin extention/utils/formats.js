@@ -96,3 +96,5 @@ const Formats = (() => {
 
   return { get, list, brief, measure, fit, split };
 })();
+
+if (typeof module !== 'undefined') module.exports = Formats;

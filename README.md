@@ -1,6 +1,6 @@
-# LinkedIn Outreach AI — v4
+# LinkedIn Outreach AI — v4.2
 
-Improvements to the Ark Abroad LinkedIn outreach extension. Same product, same server and API, same license keys.
+Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest upstream version (v3.1, 19 Nov). It needs no license key and has no company server: messages are written **free on your device**, or by **Claude with your own Anthropic API key**.
 
 **The headline:** AI outreach fails in two ways. It's *generic*, or it's *wrong*: a confident made-up "congrats on the promotion!" sent to a stranger under your name. v4 adds a **trust layer** that checks every claim in a message against what was actually read, before you hit Send. It also finds the real common ground between you and the person you're writing to.
 
@@ -9,6 +9,23 @@ Improvements to the Ark Abroad LinkedIn outreach extension. Same product, same s
   <img src="docs/screenshots/14-check-ok.png" width="260" alt="Message opening with verified common ground">
   <img src="docs/screenshots/17-insights.png" width="260" alt="Tracker insights: what gets replies">
 </p>
+
+## Two ways to write, both checked
+
+| | **Free mode** (default, no key) | **AI mode** (your Anthropic API key) |
+|---|---|---|
+| Writer | On-device writer (`utils/localwriter.js`) | Claude Haiku 5.5 (or Sonnet 5.5), prompt in `utils/prompts.js` |
+| Deep mode | Picks hooks from their profile | Claude Sonnet 5.5 + web search: recent news, talks, launches, **each with its source link** |
+| Cost | $0 | About $0.0002 per message on Haiku; a Deep run with web search is about $0.02–$0.06. Shown after every message. |
+| Network | None | `api.anthropic.com` only |
+
+Upstream's free template always opened with *"I came across your profile and was impressed by your work…"*. Our own writing check flags that as a cliché. It also ignored LinkedIn's 200/300-character note limit and produced the same text every time. The new free writer:
+- uses only facts from the profile, so it passes the fact check by construction (unit-tested across 384 combinations of purpose, tone, format and version)
+- leads with the most specific opener available: shared background, then their post, then their role
+- always fits the limit
+- rotates openers, so "Write another version" gives a real alternative
+
+In AI mode, if Claude can't be used (a bad key, no credit, an outage), the error comes with a **"Write in free mode"** button, so the user is never stuck.
 
 ## The trust layer
 
@@ -34,7 +51,7 @@ One click sends a revision request that lists exactly what to fix:
 - a missing question to them
 - a wrong first name in the greeting
 
-The previous draft goes along with it. The revised version is checked again. Every request now also carries a standing rule: *only state facts that appear in the data provided.*
+The previous draft goes along with it. The revised version is checked again. The system prompt also forbids inventing facts, and web research keeps a hook only if its URL actually appeared in the search results. A made-up link is dropped before the user ever sees it.
 
 ### Common ground
 **Import my LinkedIn** opens your own profile for a few seconds, reads it, and closes it. It also fills in your name and bio. Then every profile shows what you actually share:
@@ -86,17 +103,18 @@ Recent contacts grew from 5 to a 50-person tracker:
 ### 5. Reliability and bug fixes
 | Bug in v3 | Fix |
 |---|---|
-| Header said "● Active" for *any* saved key, even a typo | Key is verified against `/api/validate`; the header shows real status and "N left today" |
+| Header said "● Active" for *any* saved key, even a typo | v3.1 dropped license keys; the optional API key is **tested** before it's saved, and the header shows Free mode / AI · model / Key problem |
+| v3.1 AI path: `max_tokens: 400` with a model that thinks by default, so replies could be cut off or empty; `res.json()` with no retries | `max_tokens` 8000 at `effort: low`, `stop_reason` handled (refusal, max_tokens), retries for 429/529/5xx respecting `retry-after`, plain-English errors (`utils/api.js`) |
+| Scraper treated the top experience entry as the current job even when it had ended | Only "Present" (or undated) counts as current; otherwise the headline wins |
 | Deep Mode never sent your name/bio to the writer | Sent on every request |
 | Contacts with an empty `profileUrl` overwrote each other | Keyed by LinkedIn slug, one entry per person |
-| `res.json()` on Railway's HTML 502 pages → cryptic JSON error | Safe parse, 1 automatic retry on 5xx/network, plain-English errors (`utils/api.js`) |
 | No timeouts, so requests could hang forever | Per-endpoint timeouts |
 | Experience parser grouped lines in fixed chunks of 3–4, using an **India-only location regex** to decide where entries ended | Reads LinkedIn's list structure (incl. grouped roles at one company); text fallback anchors on date lines |
 | Scraper jumped the page to 2400px and dumped you at the top | Scrolls only if sections are missing, then restores your exact position |
 | Dead code and duplicate CSS from older versions | Removed |
 
 ### 6. Polish
-First-run setup (key → about you → done), dark mode, keyboard shortcuts (`Ctrl+Enter`, `Ctrl+Shift+C`, `Alt+←/→`), toasts with undo-style actions, settings that save automatically, accessible focus states and ARIA roles, reduced-motion support.
+First-run setup (free or your API key → about you → done), dark mode, keyboard shortcuts (`Ctrl+Enter`, `Ctrl+Shift+C`, `Alt+←/→`), toasts with undo-style actions, settings that save automatically, accessible focus states and ARIA roles, reduced-motion support.
 
 ## How it's built
 
@@ -107,7 +125,9 @@ linkedin extention/
   content_script.js  scraper, insert-into-LinkedIn, floating button (Shadow DOM)
   sidepanel.html/js/css   UI, a pure view over storage (renders on storage.onChanged)
   utils/
-    api.js           server client: timeouts, retries, error classification
+    api.js           Claude Messages API client: timeouts, retries, errors, cost
+    prompts.js       writer + web-research prompts; keeps only hooks with real sources
+    localwriter.js   free on-device writer and profile hooks
     session.js       per-profile working state in chrome.storage.session
     formats.js       Note/DM/InMail/Email rules, the writing brief, meter, trim
     contacts.js      tracker store (migrates v3 "recentContacts" automatically)
@@ -116,32 +136,40 @@ linkedin extention/
     lint.js          writing check (clichés, placeholders, wrong name, no ask…)
 ```
 
-**No backend changes were needed.** The server's API has no notion of formats, so the requirements travel as a short written brief appended to the sender bio, which the server already gives the model. The request also carries explicit `format`, `maxChars` and `instructions` fields, ready for when the server reads them. Hook selection works by filtering `enrichmentJSON.topHooks` before it goes back to `/api/generate/deep`.
+**Calling Claude from the extension.** Following upstream, requests go straight from the service worker to `POST /v1/messages` with `fetch` and the `anthropic-dangerous-direct-browser-access` header, because the extension ships unbundled. The key is the user's own, stored in `chrome.storage.local`, and sent only to `api.anthropic.com`.
+- **Writer request:** the full context goes in as JSON inside `<context>` tags (recipient, research hooks with sources, shared background, sender, resume as a PDF document block). The per-request rules go in `<requirements>` (format, hard limit, revision instructions).
+- **Research request:** uses the `web_search_20260209` server tool on Claude Sonnet 5.5. `pause_turn` is resumed, and server-side refusal fallback is enabled.
 
 ## Install
 
 1. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `linkedin extention/`.
-2. Click the toolbar icon (or press `Alt+Shift+O`) to open the side panel and enter your license key.
+2. Click the toolbar icon (or press `Alt+Shift+O`) to open the side panel. Start free, or paste an Anthropic API key (`sk-ant-…`) for AI mode.
 
 ## Tests
 
-- **`tests/unit.js`**: 36 checks on the trust layer, covering true messages with no false alarms, invented claims, sender claims, acronyms, and the lint rules.
-- **`tests/e2e.js`**: 78 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Ark API (`tests/mock-server.js`). They cover:
-  - onboarding and key validation
+- **`tests/unit.js`**: 59 checks.
+  - Fact check: true messages raise no false alarms; invented claims, sender claims and acronyms are handled.
+  - Lint rules.
+  - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.
+  - The Claude client: headers, 401/429/529/credit errors, refusal, truncation, cost.
+  - Research parsing: made-up source URLs are dropped.
+- **`tests/e2e.js`**: 106 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
+  - onboarding (free, or with a key) and key testing
   - scraping both page layouts
   - LinkedIn swapping pages before the content updates
-  - quick and deep generation
+  - quick and deep generation, with request shapes checked
   - closing the panel mid-run
-  - hook selection
+  - hook selection, with sources
   - the 200/300 limits and trimming
   - inserting into the invite note and the message box
   - tracker, follow-ups and CSV export
-  - retry after a 502, and auth errors
+  - 529 retry, credit and auth errors, and "Write in free mode" recovery
   - importing your profile
   - common ground
   - a simulated hallucination caught, then fixed with AI
   - live re-check while editing
   - insights
+  - free mode end to end, with zero network calls
 
 ```bash
 node tests/unit.js

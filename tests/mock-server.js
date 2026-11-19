@@ -1,113 +1,159 @@
 'use strict';
-// Mock of the Ark server API, for local testing without spending real credits.
-// Mirrors the request/response shapes background.js relies on.
+// Mock of the Anthropic Messages API (POST /v1/messages), for testing AI mode
+// without a real key or spending money. Mirrors the response shapes the
+// extension relies on: thinking + text blocks, usage, web search server-tool
+// blocks, pause_turn, and typed error bodies.
+//
+// Behaviour switches, read from the request (as the extension sends them):
+//   "HALLUCINATE" in the extra context  → writes an invented promotion
+//   "LONG" in the extra context         → an over-limit connection note
+//   "FLAKY" in the extra context        → first call returns 529 overloaded
+//   "NOCREDIT" in the extra context     → 400 credit balance too low
 
 const http = require('http');
 
-const VALID_KEY = 'ARK-TEST-0000-0001';
-let remaining = 20;
+const VALID_KEY = 'sk-ant-test-valid-key-0123456789abcdef';
 const log = [];
+let flaked = false;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function messageFor(body, kind) {
-  const p = body.profileData || body.profileJSON || {};
+function userText(body) {
+  const c = body.messages?.[0]?.content;
+  if (typeof c === 'string') return c;
+  return (c || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+}
+
+function parseContext(text) {
+  const m = /<context>\s*([\s\S]*?)\s*<\/context>/.exec(text);
+  try { return m ? JSON.parse(m[1]) : {}; } catch (_) { return {}; }
+}
+
+function requirements(text) {
+  const m = /<requirements>\s*([\s\S]*?)\s*<\/requirements>/.exec(text);
+  return m ? m[1] : '';
+}
+
+function formatOf(req) {
+  if (/connection request note/i.test(req)) return 'note';
+  if (/direct message/i.test(req)) return 'dm';
+  if (/InMail/.test(req)) return 'inmail';
+  if (/cold email/i.test(req)) return 'email';
+  return 'note';
+}
+
+function writeMessage(ctx, req) {
+  const p = ctx.recipient || {};
   const first = (p.name || 'there').split(' ')[0];
-  const hooks = (body.enrichmentJSON && body.enrichmentJSON.topHooks) || [];
-  const hook = hooks[0] ? ` Saw that ${hooks[0].charAt(0).toLowerCase() + hooks[0].slice(1).replace(/\.$/, '')}, exciting stuff.` : '';
   const role = p.currentTitle ? ` your work as ${p.currentTitle}` : ' your work';
   const company = p.currentCompany ? ` at ${p.currentCompany}` : '';
-  const shorter = /shorter/i.test(body.instructions || '');
-  const long = /LONG/.test(body.userBio || '');
-  const revising = /Revise the previous draft/.test(body.instructions || '');
-  const common = /Open with the strongest one, naturally: ([^;\n]+?)(?:;|\.\n|\.$)/.exec(body.instructions || '');
+  const hook = ctx.research_hooks?.[0]?.hook;
+  const hookLine = hook ? ` Saw that ${hook.charAt(0).toLowerCase() + hook.slice(1).replace(/\.$/, '')}.` : '';
+  const sender = ctx.sender?.name || 'a student';
+  const revising = /Revise the previous draft/.test(req);
+  const shorter = /shorter/i.test(req);
+  const common = /Open with the strongest one, naturally: ([^;\n]+?)(?:;|\.\n|\.$)/.exec(req);
   const school = common && /studied at (.+)$/.exec(common[1]);
+  const format = formatOf(req);
 
-  // Simulate a model hallucination the fact check should catch.
-  if (/HALLUCINATE/.test(body.userBio || '') && !revising) {
+  if (/HALLUCINATE/.test(req) && !revising) {
     return `Hi ${first}, congrats on your recent promotion to Director at Google! I came across your profile and loved${role}${company}. Would you be open to a quick chat?`;
   }
   if (revising) {
-    return `Hi ${first}, loved${role}${company}.${hook ? hook.slice(0, 70) : ''} Would you be open to a quick chat about how your team works?`.slice(0, 199);
+    return `Hi ${first}, loved${role}${company}.${hookLine.slice(0, 80)} Would you be open to a quick chat about how your team works?`.slice(0, 199);
   }
-  if (school && body.format === 'note') {
-    return `Hi ${first}, fellow ${school[1]} alum here! Loved${role}${company}. Would you be open to connecting?`;
+  if (format === 'inmail' || format === 'email') {
+    return `Subject: Quick question about ${p.currentCompany || 'your team'}\n\nHi ${first},\n\nI've been following${role}${company}.${hookLine} I'm ${sender} and I'd love 15 minutes to hear how your team approaches its roadmap.\n\nWould next week work?\n\nBest,\n${sender}`;
   }
+  if (format === 'dm') {
+    return `Hi ${first}, thanks for connecting!${hookLine} I really enjoyed reading about${role}${company}. I'm exploring this space and would value your perspective. Open to a quick chat sometime?`;
+  }
+  if (school) return `Hi ${first}, fellow ${school[1]} alum here! Loved${role}${company}. Would you be open to connecting?`;
+  if (/LONG/.test(req) && !shorter) {
+    return `Hi ${first}, I was genuinely impressed by${role}${company}.${hookLine} I'm ${sender}, working on similar problems, and I would really love to connect, learn from your experience, and swap notes on what has worked for your team recently. Thanks so much!`;
+  }
+  return `Hi ${first}, loved${role}${company}.${hookLine ? hookLine.slice(0, 70) : ''} I'm ${sender} and would love to connect!`.slice(0, 199);
+}
 
-  switch (body.format) {
-    case 'inmail':
-    case 'email':
-      return `Subject: Quick question about ${p.currentCompany || 'your team'}\n\nHi ${first},\n\nI've been following${role}${company}.${hook} I'm ${body.userName || 'a student'} and I'd love 15 minutes to hear how your team approaches ${body.messageType === 'Job' ? 'hiring for new grads' : 'its roadmap'}.\n\nWould next week work?\n\nBest,\n${body.userName || ''}`;
-    case 'dm':
-      return `Hi ${first}, thanks for connecting!${hook} I really enjoyed reading about${role}${company}. I'm exploring ${body.messageType === 'Job' ? 'roles' : 'ideas'} in this space and would value your perspective. Open to a quick chat sometime?`;
-    default: {
-      if (long && !shorter) {
-        return `Hi ${first}, I came across your profile and was genuinely impressed by${role}${company}.${hook} I'm ${body.userName || 'a student'} working on similar problems and I would really love to connect, learn from your experience, and perhaps swap notes on what's worked for your team recently. Thanks so much!`;
-      }
-      return `Hi ${first}, loved${role}${company}.${hook ? hook.slice(0, 70) : ''} I'm ${body.userName || 'exploring this space'} too and would love to connect!`.slice(0, 199);
-    }
+function message(model, content, usage, stop = 'end_turn') {
+  return { id: 'msg_mock_' + Date.now(), type: 'message', role: 'assistant', model, content, stop_reason: stop, usage };
+}
+
+function research(body) {
+  const who = JSON.parse(/<person>\s*([\s\S]*?)\s*<\/person>/.exec(userText(body))?.[1] || '{}');
+  const co = who.currentCompany || 'Their company';
+  const search = {
+    type: 'server_tool_use', id: 'srvtoolu_01', name: 'web_search', input: { query: `${co} news 2026` }
+  };
+  const results = {
+    type: 'web_search_tool_result', tool_use_id: 'srvtoolu_01',
+    content: [
+      { type: 'web_search_result', url: 'https://techcrunch.com/2026/10/14/lumen-analytics-series-b/', title: `${co} raises $40M Series B`, page_age: 'October 14, 2026', encrypted_content: 'x' },
+      { type: 'web_search_result', url: 'https://pydata.org/berlin2026/speaker/priya-sharma', title: 'PyData Berlin 2026: Feature stores without a platform team', page_age: 'September 2026', encrypted_content: 'x' }
+    ]
+  };
+  // First call pauses mid-turn, like a long server-tool loop does.
+  if (body.messages.length === 1) {
+    return message(body.model, [search, results], { input_tokens: 4200, output_tokens: 120, server_tool_use: { web_search_requests: 1 } }, 'pause_turn');
   }
+  const hooks = [
+    { hook: `${co} raised a $40M Series B in October 2026 to expand in Europe`, url: 'https://techcrunch.com/2026/10/14/lumen-analytics-series-b', date: '2026-10' },
+    { hook: `${who.name} spoke at PyData Berlin 2026 about feature stores`, url: 'https://pydata.org/berlin2026/speaker/priya-sharma/', date: '2026-09' },
+    { hook: `${who.name} was named to Forbes 30 Under 30`, url: 'https://made-up.example.com/forbes', date: '' }
+  ];
+  return message(body.model, [
+    { type: 'thinking', thinking: '', signature: 'sig' },
+    { type: 'text', text: `I found two reliable items.\n<hooks>${JSON.stringify(hooks)}</hooks>` }
+  ], { input_tokens: 9800, output_tokens: 650, server_tool_use: { web_search_requests: 1 } });
 }
 
 const server = http.createServer(async (req, res) => {
-  const send = (status, obj, raw) => {
-    res.writeHead(status, { 'Content-Type': raw ? 'text/html' : 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(raw || JSON.stringify(obj));
+  const send = (status, obj) => {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify(obj));
   };
+  const err = (status, type, msg) => send(status, { type: 'error', error: { type, message: msg }, request_id: 'req_mock' });
 
   if (req.method === 'GET' && req.url === '/__log') return send(200, log);
-  if (req.method === 'POST' && req.url === '/__reset') { log.length = 0; remaining = 20; return send(200, { ok: true }); }
+  if (req.method === 'POST' && req.url === '/__reset') { log.length = 0; flaked = false; return send(200, { ok: true }); }
 
   let raw = '';
   for await (const chunk of req) raw += chunk;
   let body = {};
-  try { body = JSON.parse(raw || '{}'); } catch (_) { return send(400, { error: 'bad json' }); }
-  log.push({ path: req.url, body, at: Date.now() });
+  try { body = JSON.parse(raw || '{}'); } catch (_) { return err(400, 'invalid_request_error', 'bad json'); }
+  const headers = {
+    key: req.headers['x-api-key'], version: req.headers['anthropic-version'],
+    browser: req.headers['anthropic-dangerous-direct-browser-access'], beta: req.headers['anthropic-beta']
+  };
+  const entry = { path: req.url, body, headers, at: Date.now() };
+  log.push(entry);
 
-  if (req.url === '/api/validate') {
-    return body.key === VALID_KEY
-      ? send(200, { valid: true, remaining })
-      : send(200, { valid: false, reason: 'Key not recognised.' });
+  if (req.url !== '/v1/messages') return err(404, 'not_found_error', 'Not found');
+  if (headers.key !== VALID_KEY) return err(401, 'authentication_error', 'invalid x-api-key');
+  if (!headers.version) return err(400, 'invalid_request_error', 'anthropic-version header is required');
+
+  const text = userText(body);
+  if (/Reply with the single word: OK/.test(text)) {
+    return send(200, message(body.model, [{ type: 'text', text: 'OK' }], { input_tokens: 12, output_tokens: 2 }));
+  }
+  if ((body.tools || []).some(t => t.name === 'web_search')) {
+    await sleep(700);
+    return send(200, research(body));
   }
 
-  if (body.key !== VALID_KEY) return send(401, { success: false, error: 'Invalid license key.' });
+  const ctx = parseContext(text);
+  const reqs = requirements(text);
+  if (/NOCREDIT/.test(reqs)) return err(400, 'invalid_request_error', 'Your credit balance is too low to access the Anthropic API.');
+  if (/FLAKY/.test(reqs) && !flaked) { flaked = true; entry.flaked = true; return err(529, 'overloaded_error', 'Overloaded'); }
 
-  // Simulated cold start: first call with "FLAKY" context returns a Railway HTML 502.
-  if (/FLAKY/.test(body.userBio || '') && !log.some(l => l.flaked)) {
-    log[log.length - 1].flaked = true;
-    return send(502, null, '<html><body><h1>502 Bad Gateway</h1></body></html>');
-  }
-
-  if (req.url === '/api/generate/quick') {
-    await sleep(400);
-    remaining--;
-    return send(200, { success: true, message: messageFor(body, 'quick'), remaining });
-  }
-  if (req.url === '/api/generate/enrich') {
-    await sleep(900);
-    const p = body.rawProfileData || {};
-    return send(200, {
-      success: true,
-      profileJSON: { name: p.name, headline: p.headline, currentTitle: p.currentTitle, currentCompany: p.currentCompany },
-      enrichmentJSON: {
-        topHooks: [
-          `${p.currentCompany || 'Their company'} just raised a Series B to expand in Europe`,
-          `Spoke at PyData Berlin about feature stores`,
-          `Recently posted about hiring junior ML engineers`,
-          `Open-sourced an internal data-quality tool`
-        ],
-        companyNews: []
-      }
-    });
-  }
-  if (req.url === '/api/generate/deep') {
-    await sleep(600);
-    remaining--;
-    return send(200, { success: true, message: messageFor(body, 'deep'), remaining });
-  }
-  send(404, { error: 'not found' });
+  await sleep(350);
+  return send(200, message(body.model, [
+    { type: 'thinking', thinking: '', signature: 'sig' },
+    { type: 'text', text: writeMessage(ctx, reqs) }
+  ], { input_tokens: 1400, output_tokens: 180 }));
 });
 
 const port = Number(process.env.PORT || 8787);
-server.listen(port, () => console.log(`mock server on :${port}`));
+server.listen(port, () => console.log(`mock Anthropic API on :${port}`));
 module.exports = server;
+module.exports.VALID_KEY = VALID_KEY;

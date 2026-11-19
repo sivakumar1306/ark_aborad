@@ -13,7 +13,7 @@ const ROOT     = path.resolve(__dirname, '..');
 const EXT_SRC  = path.join(ROOT, 'linkedin extention');
 const PORT     = 8787;
 const MOCK     = `http://localhost:${PORT}`;
-const KEY      = 'ARK-TEST-0000-0001';
+const KEY      = 'sk-ant-test-valid-key-0123456789abcdef'; // the mock's valid key
 const SHOTS    = process.env.SHOTS ? path.join(ROOT, 'docs', 'screenshots') : null;
 
 let passed = 0, failed = 0;
@@ -27,7 +27,7 @@ function buildTestExtension() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-ext-'));
   fs.cpSync(EXT_SRC, dir, { recursive: true });
   const apiPath = path.join(dir, 'utils/api.js');
-  fs.writeFileSync(apiPath, fs.readFileSync(apiPath, 'utf8').replace(/const SERVER_URL = '[^']+'/, `const SERVER_URL = '${MOCK}'`));
+  fs.writeFileSync(apiPath, fs.readFileSync(apiPath, 'utf8').replace(/const API_URL = '[^']+'/, `const API_URL = '${MOCK}/v1/messages'`));
   const mPath = path.join(dir, 'manifest.json');
   const m = JSON.parse(fs.readFileSync(mPath, 'utf8'));
   m.host_permissions.push(`${MOCK}/*`);
@@ -36,6 +36,15 @@ function buildTestExtension() {
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Helpers over the mock's request log.
+const getLog = async () => (await fetch(`${MOCK}/__log`)).json();
+const textOf = (e) => { const c = e.body.messages?.[0]?.content; return typeof c === 'string' ? c : (c || []).filter(b => b.type === 'text').map(b => b.text).join('\n'); };
+const isWriter = (e) => e.path === '/v1/messages' && !(e.body.tools || []).length && !/single word: OK/.test(textOf(e));
+const isResearch = (e) => e.path === '/v1/messages' && (e.body.tools || []).some(t => t.name === 'web_search');
+const ctxOf = (e) => JSON.parse(/<context>\s*([\s\S]*?)\s*<\/context>/.exec(textOf(e))[1]);
+const reqsOf = (e) => /<requirements>\s*([\s\S]*?)\s*<\/requirements>/.exec(textOf(e))[1];
+const lastWriter = async () => (await getLog()).filter(isWriter).pop();
 
 async function main() {
   const server = require('./mock-server');
@@ -83,21 +92,25 @@ async function main() {
   await panel.waitForSelector('#onboarding:not(.hidden)');
   check('onboarding shown on first run', true);
   await shot('01-onboarding');
-  await panel.fill('#ob-key', 'ARK-WRONG-KEY');
-  await panel.click('#ob-verify');
+  check('free mode offered, no key required', await panel.isVisible('#ob-free'));
+  await panel.fill('#ob-key', 'sk-ant-wrong-key-zzzzzzzzzzzzzzzzzzzzzz');
+  await panel.click('#ob-test');
   await panel.waitForSelector('#ob-key-status[data-status="invalid"]');
-  check('invalid key rejected with server reason', (await panel.textContent('#ob-key-status')).includes('not recognised'));
-  await panel.fill('#ob-key', KEY.toLowerCase());
-  await panel.click('#ob-verify');
+  check('bad API key rejected in plain words', (await panel.textContent('#ob-key-status')).includes('rejected your API key'));
+  check('bad key not saved', !(await sw.evaluate(() => chrome.storage.local.get('userApiKey'))).userApiKey);
+  await panel.fill('#ob-key', KEY);
+  await panel.click('#ob-test');
   await panel.waitForSelector('#ob-key-status[data-status="valid"]');
-  check('valid key accepted, shows remaining', (await panel.textContent('#ob-key-status')).includes('20 messages left'));
+  check('valid API key accepted', (await panel.textContent('#ob-key-status')).includes('AI mode is on'));
+  const testCall = (await getLog()).pop();
+  check('key test uses direct-browser header + Haiku', testCall.headers.browser === 'true' && testCall.body.model === 'claude-haiku-5-5' && testCall.headers.version === '2023-06-01', testCall.headers);
   await panel.waitForSelector('[data-ob="2"]:not(.hidden)');
   await panel.fill('#ob-name', 'Sam Rivera');
   await panel.fill('#ob-bio', 'Final-year CS student into ML infra.');
   await panel.click('#ob-next');
   await panel.click('#ob-done');
   await panel.waitForSelector('#onboarding.hidden', { state: 'attached' });
-  check('quota chip reflects license', (await panel.textContent('#quota-chip')).includes('20 left'));
+  check('chip shows AI mode', (await panel.textContent('#mode-chip')) === 'AI · Haiku 5.5', await panel.textContent('#mode-chip'));
 
   // ── 2. Profile pickup ────────────────────────────────────────────────────
   console.log('\nProfile');
@@ -125,9 +138,15 @@ async function main() {
   check('recent posts parsed', p.recentPosts.length === 2, p.recentPosts);
   check('about parsed', p.about.startsWith('I build the plumbing'));
 
-  let log = await (await fetch(`${MOCK}/__log`)).json();
-  const q = log.filter(l => l.path === '/api/generate/quick').pop().body;
-  check('quick request sends format + brief', q.format === 'note' && /HARD LIMIT/.test(q.userBio) && q.userName === 'Sam Rivera', q);
+  let log = await getLog();
+  const qe = log.filter(isWriter).pop();
+  const qctx = ctxOf(qe);
+  check('writer: Haiku 5.5, low effort, room for thinking', qe.body.model === 'claude-haiku-5-5' && qe.body.output_config?.effort === 'low' && qe.body.max_tokens >= 4000, [qe.body.model, qe.body.max_tokens]);
+  check('writer: system prompt forbids invented facts', /Never invent/.test(qe.body.system));
+  check('writer: format + hard limit in requirements', /connection request note/.test(reqsOf(qe)) && /HARD LIMIT/.test(reqsOf(qe)), reqsOf(qe));
+  check('writer: profile + sender in context', qctx.recipient.name === 'Priya Sharma' && qctx.recipient.recentPosts.length === 2 && qctx.sender.name === 'Sam Rivera', qctx.sender);
+  check('thinking block ignored, only text kept', !msg1.includes('sig') && msg1.length > 20);
+  check('cost shown for AI message', /Haiku 5\.5 · (<?\$0\.\d+)/.test(await panel.textContent('#step-note')), await panel.textContent('#step-note'));
   check('meter shows note limit', (await panel.textContent('#meter-text')).includes('/ 300'));
   await shot('03-quick-result');
 
@@ -156,20 +175,28 @@ async function main() {
 
   // ── 5. Hooks selection ───────────────────────────────────────────────────
   console.log('\nDeep mode hooks');
-  const hookCount = await panel3.locator('#hooks-list .hook').count();
-  check('hooks shown with checkboxes', hookCount === 4, hookCount);
-  check('first 3 hooks preselected', (await panel3.locator('#hooks-list input:checked').count()) === 3);
+  log = await getLog();
+  const rs = log.filter(isResearch);
+  check('research: Sonnet 5.5 + web_search_20260209', rs[0].body.model === 'claude-sonnet-5-5' && rs[0].body.tools[0].type === 'web_search_20260209', rs[0].body.tools);
+  check('research: refusal fallback enabled', rs[0].body.fallbacks === 'default' && /server-side-fallback-2026-07-01/.test(rs[0].headers.beta || ''));
+  check('research: pause_turn resumed', rs.length === 2 && rs[1].body.messages.length === 2 && rs[1].body.messages[1].role === 'assistant');
+  const hookTexts = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
+  check('hook with a made-up source URL dropped', !hookTexts.some(t => t.includes('Forbes')), hookTexts);
+  check('web hooks + their post', hookTexts.length === 3 && hookTexts[0].includes('Series B') && hookTexts[2].includes('posted'), hookTexts);
+  check('each web hook links its source', (await panel3.$$eval('#hooks-list .hook-src', xs => xs.map(x => x.textContent))).join().includes('techcrunch.com'));
+  check('all 3 preselected', (await panel3.locator('#hooks-list input:checked').count()) === 3);
   await shot('05-deep-hooks', panel3);
+  check('deep run cost includes research', /Haiku 5\.5 · \$0\.0[1-9]\d/.test(await panel3.textContent('#step-note')), await panel3.textContent('#step-note'));
   await panel3.locator('#hooks-list input').nth(0).uncheck();
   await panel3.waitForFunction(() => /Write with 2 hooks/.test(document.getElementById('primary-label').textContent));
   check('button reflects hook selection', true);
   await panel3.click('#primary-btn');
   await panel3.waitForFunction(() => document.getElementById('v-label').textContent.trim() === '3 / 3', null, { timeout: 15000 });
-  log = await (await fetch(`${MOCK}/__log`)).json();
-  const d = log.filter(l => l.path === '/api/generate/deep').pop().body;
-  check('only selected hooks sent to writer', d.enrichmentJSON.topHooks.length === 2 && !d.enrichmentJSON.topHooks[0].includes('Series B'), d.enrichmentJSON.topHooks);
-  check('deep request now includes your name + bio', d.userName === 'Sam Rivera' && d.userBio.includes('Final-year'), d.userName);
-  check('enrich did not re-run for rewrite', log.filter(l => l.path === '/api/generate/enrich').length === 1);
+  log = await getLog();
+  const dctx = ctxOf(log.filter(isWriter).pop());
+  check('only selected hooks sent to writer, with sources', dctx.research_hooks.length === 2 && !dctx.research_hooks[0].hook.includes('Series B') && dctx.research_hooks[0].source.includes('pydata'), dctx.research_hooks);
+  check('writer gets your name + bio', dctx.sender.name === 'Sam Rivera' && dctx.sender.bio.includes('Final-year'), dctx.sender);
+  check('research did not re-run for rewrite', log.filter(isResearch).length === 2);
   await panel3.click('#v-prev');
   check('version navigation', (await panel3.textContent('#v-label')).trim() === '2 / 3');
 
@@ -284,16 +311,29 @@ async function main() {
   await sleep(500);
   await panel3.click('#regen-btn');
   await panel3.waitForFunction(() => document.getElementById('v-label').textContent.trim() === '2 / 2', null, { timeout: 20000 });
-  check('HTML 502 is retried transparently', true);
-  await sw.evaluate(() => chrome.storage.local.set({ licenseKey: 'ARK-REVOKED-KEY' }));
-  await sleep(200);
+  check('529 overloaded is retried transparently', (await getLog()).some(e => e.flaked));
+  await panel3.fill('#opt-context', 'NOCREDIT');
+  await sleep(500);
   await panel3.click('#regen-btn');
   await panel3.waitForSelector('#error-banner:not(.hidden)', { timeout: 10000 });
-  check('auth error shown in plain words', (await panel3.textContent('#error-text')).includes('Invalid license key'));
+  check('credit error explained', (await panel3.textContent('#error-text')).includes('credit balance is too low'));
+  await panel3.fill('#opt-context', '');
+  await sleep(500);
+  await sw.evaluate(() => chrome.storage.local.set({ userApiKey: 'sk-ant-revoked-key-yyyyyyyyyyyyyyyyyyyy' }));
+  await sleep(300);
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction(() => /rejected your API key/.test(document.getElementById('error-text').textContent), null, { timeout: 10000 });
+  check('auth error shown in plain words', true);
   check('error action routes to Settings', (await panel3.textContent('#error-action')) === 'Open Settings');
-  check('chip flips to invalid', (await panel3.textContent('#quota-chip')).includes('invalid') || (await panel3.textContent('#quota-chip')).includes('saved'));
+  check('chip flips to key problem', (await panel3.textContent('#mode-chip')) === 'Key problem', await panel3.textContent('#mode-chip'));
   await shot('09-error', panel3);
-  await sw.evaluate((k) => chrome.storage.local.set({ licenseKey: k }), KEY);
+  const beforeFree = (await getLog()).filter(isWriter).length;
+  const vFree = await panel3.textContent('#v-label');
+  await panel3.click('#error-free');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vFree, { timeout: 10000 });
+  check('"Write in free mode" recovers without the API', (await getLog()).filter(isWriter).length === beforeFree && /free mode/.test(await panel3.textContent('#step-note')));
+  await sw.evaluate((k) => chrome.storage.local.set({ userApiKey: k, keyStatus: null }), KEY);
+  await sleep(300);
 
   // ── 11. Trust layer: import me, common ground, fact check, fix with AI ───
   console.log('\nImport my LinkedIn');
@@ -311,6 +351,8 @@ async function main() {
   check('own profile imported', (await panel3.textContent('#me-name')) === 'Sam Rivera');
   check('import tab closed again', ctx.pages().every(p => !p.url().includes('sam-rivera')));
   check('import summary', (await panel3.textContent('#me-meta')).includes('2 schools'));
+  const me = await sw.evaluate(async () => (await chrome.storage.local.get('myProfile')).myProfile);
+  check('ended internship is not your current job', me.currentCompany === 'TU Delft' && me.pastCompanies.includes('Zalando'), [me.currentCompany, me.pastCompanies]);
   await shot('13-settings-me', panel3);
 
   console.log('\nCommon ground');
@@ -326,9 +368,9 @@ async function main() {
   const before = await panel3.textContent('#v-label');
   await panel3.click('#regen-btn');
   await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, before, { timeout: 15000 });
-  log = await (await fetch(`${MOCK}/__log`)).json();
-  const qg = log.filter(l => l.path === '/api/generate/quick').pop().body;
-  check('common ground sent to the writer', /Genuine shared background.*IIT Bombay/.test(qg.instructions), qg.instructions);
+  const qg = await lastWriter();
+  check('common ground sent to the writer', /Genuine shared background.*IIT Bombay/.test(reqsOf(qg)) && ctxOf(qg).shared_background.includes('You both studied at IIT Bombay'), reqsOf(qg));
+  check('your imported profile sent as sender context', ctxOf(qg).sender.profile?.name === 'Sam Rivera');
   const mg = await panel3.inputValue('#message');
   check('message opens with common ground', mg.includes('fellow IIT Bombay alum'), mg);
 
@@ -361,11 +403,10 @@ async function main() {
   const b3 = await panel3.textContent('#v-label');
   await panel3.click('#fix-ai-btn');
   await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, b3, { timeout: 15000 });
-  log = await (await fetch(`${MOCK}/__log`)).json();
-  const fx = log.filter(l => l.path === '/api/generate/quick').pop().body;
-  check('fix request lists the unsupported sentence', /unsupported claims[\s\S]*promotion to Director at Google/.test(fx.instructions), fx.instructions);
-  check('fix request lists the cliché', /Avoid these clichés[\s\S]*came across your profile/.test(fx.instructions));
-  check('fix request includes the previous draft', /Previous draft: "{3}Hi Priya, congrats/.test(fx.instructions));
+  const fx = reqsOf(await lastWriter());
+  check('fix request lists the unsupported sentence', /unsupported claims[\s\S]*promotion to Director at Google/.test(fx), fx);
+  check('fix request lists the cliché', /Avoid these clichés[\s\S]*came across your profile/.test(fx));
+  check('fix request includes the previous draft', /Previous draft: "{3}Hi Priya, congrats/.test(fx));
   await panel3.waitForFunction(() => document.getElementById('check').dataset.level === 'ok', null, { timeout: 5000 }).catch(() => {});
   check('fixed version passes the check', (await panel3.evaluate(() => document.getElementById('check').dataset.level)) === 'ok', await panel3.textContent('#check-summary'));
   await shot('16-check-fixed', panel3);
@@ -398,7 +439,48 @@ async function main() {
   check('surfaces what works (common ground)', /with common ground got 50% replies vs 33% without \(4 vs 3 sent\)/.test(ins), ins);
   await shot('17-insights', panel3);
 
-  // ── 12. Dark mode screenshot ─────────────────────────────────────────────
+  // ── 12. Free mode (no API key) ───────────────────────────────────────────
+  console.log('\nFree mode');
+  await panel3.click('#tab-settings');
+  await panel3.click('#remove-key');
+  await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'Free mode');
+  check('removing the key switches to free mode', true);
+  await li.goto('https://www.linkedin.com/in/priya-sharma-test/');
+  await panel3.click('#tab-compose');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Priya Sharma', null, { timeout: 8000 });
+  await panel3.click('#opt-mode [data-value="quick"]');
+  await panel3.click('#opt-format [data-value="note"]');
+  await panel3.evaluate(() => { document.getElementById('context-box').open = true; });
+  await panel3.fill('#opt-context', '');
+  await sleep(400);
+  const callsBefore = (await getLog()).length;
+  let vb = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  const free1 = await panel3.inputValue('#message');
+  check('free mode makes no network calls', (await getLog()).length === callsBefore);
+  check('free note fits the 200-char limit', free1.length <= 200, free1.length);
+  check('free note opens with verified common ground', /fellow IIT Bombay alum|both spent time at Zalando/.test(free1), free1);
+  check('free note avoids upstream’s cliché', !/came across your profile/i.test(free1));
+  await panel3.waitForFunction(() => document.getElementById('check').dataset.level === 'ok', null, { timeout: 3000 }).catch(() => {});
+  check('free note passes the fact check', (await panel3.evaluate(() => document.getElementById('check').dataset.level)) === 'ok', await panel3.textContent('#check-summary'));
+  check('Fix with AI needs a key', await panel3.isDisabled('#fix-ai-btn'));
+  vb = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  check('another version is actually different', (await panel3.inputValue('#message')) !== free1);
+  await shot('18-free-mode', panel3);
+
+  await panel3.click('#opt-mode [data-value="deep"]');
+  check('deep hint explains free research', (await panel3.textContent('#mode-hint')).includes('from their profile'));
+  vb = await panel3.textContent('#v-label');
+  await panel3.click('#primary-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  const freeHooks = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
+  check('free deep mode: profile hooks, no web calls', freeHooks.some(t => t.startsWith('Recently posted')) && (await getLog()).length === callsBefore, freeHooks);
+  await panel3.click('#opt-mode [data-value="quick"]');
+
+  // ── 13. Dark mode screenshot ─────────────────────────────────────────────
   if (SHOTS) {
     await panel3.click('#tab-settings');
     await panel3.click('#set-theme [data-value="dark"]');

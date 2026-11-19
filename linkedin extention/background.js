@@ -4,13 +4,17 @@
 //
 // Runs every scrape → research → write job and records progress in
 // chrome.storage.session (see utils/session.js). The side panel is a pure view of
-// that state, so closing it mid-run loses nothing. All AI happens server-side;
-// the extension only sends profile data + the license key.
+// that state, so closing it mid-run loses nothing.
+//
+// Two writers: Free mode (utils/localwriter.js, on-device, no key) and AI mode
+// (Claude with the user's own Anthropic API key, utils/api.js + utils/prompts.js).
+// There is no company server and no license key.
 
-importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js');
+importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js',
+  'utils/localwriter.js', 'utils/prompts.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
-const SETTINGS_KEYS  = ['licenseKey', 'userName', 'userBio', 'resumeBase64', 'license', 'noteLimit', 'followUpDays'];
+const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(() => {
@@ -71,7 +75,7 @@ const HANDLERS = {
   GENERATE:        (m) => runJob(m.key, () => jobGenerate(m)),
   WRITE:           (m) => runJob(m.key, () => jobWrite(m)),
   PATCH_SESSION:   (m) => patchSession(m),
-  VALIDATE_KEY:    (m) => validateKey(m.key),
+  TEST_KEY:        (m) => testKey(m.key),
   INSERT:          (m) => insertIntoPage(m),
   IMPORT_ME:       (m) => importMyProfile(m),
   CONTACT_STATUS:  async (m) => { const s = await getSettings(); const c = await ContactStore.setStatus(m.id, m.status, s.followUpDays ?? 5); refreshBadge(); return { contact: c }; },
@@ -89,8 +93,7 @@ function runJob(key, fn) {
   const stopKeepAlive = keepAlive();
   fn()
     .catch(err => {
-      if (err.code === 'auth')  setLicense({ status: 'invalid', reason: err.message });
-      if (err.code === 'quota') setLicense({ remaining: 0 });
+      if (['auth', 'billing', 'permission'].includes(err.code)) setKeyStatus({ status: 'invalid', reason: err.message, code: err.code });
       return Sessions.update(key, s => failSteps(s, err.message, err.code));
     })
     .finally(() => { running.delete(key); stopKeepAlive(); });
@@ -105,8 +108,9 @@ function keepAlive() {
 }
 
 async function jobGenerate({ tabId, key, mode, options }) {
-  const settings = await requireKey();
+  const settings = await getSettings();
   const deep = mode === 'deep';
+  const useAI = !!settings.userApiKey && !options?.forceLocal;
 
   await Sessions.update(key, s => {
     s.mode = mode;
@@ -127,26 +131,36 @@ async function jobGenerate({ tabId, key, mode, options }) {
   await Sessions.update(key, x => { x.steps.read = 'done'; return x; });
 
   if (deep) {
-    await Sessions.update(key, x => { x.stage = 'researching'; x.steps.research = 'running'; x.notice = 'Searching company news and public work — usually ~20s'; return x; });
-    const r = await API.post('/api/generate/enrich', {
-      key: settings.licenseKey,
-      rawProfileData: Sessions.effectiveProfile(s)
-    }, { timeoutMs: 120000, retries: 1, expectSuccess: true, onRetry: retryNotice(key) });
-
-    await Sessions.update(key, x => {
-      x.research = { profileJSON: r.profileJSON || {}, enrichmentJSON: r.enrichmentJSON || {} };
-      x.hooks = extractHooks(r.enrichmentJSON).map((text, i) => ({ text, selected: i < 3 }));
-      x.steps.research = 'done';
-      x.notice = null;
-      return x;
-    });
+    const profile = Sessions.effectiveProfile(s);
+    const local = LocalWriter.hooks(profile);
+    if (useAI) {
+      await Sessions.update(key, x => { x.stage = 'researching'; x.steps.research = 'running'; x.notice = `Searching the web for recent news about ${profile.currentCompany || profile.name}…`; return x; });
+      const r = await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
+      // Web hooks first, then the strongest profile hooks (their posts).
+      const hooks = [...r.hooks, ...local.filter(h => h.kind === 'post')].slice(0, 6);
+      await Sessions.update(key, x => {
+        x.research = { source: 'web', searches: r.searches, cost: r.cost, at: Date.now() };
+        x.hooks = hooks.map((h, i) => ({ ...h, selected: i < 3 }));
+        x.steps.research = 'done';
+        x.notice = `${r.searches} search${r.searches === 1 ? '' : 'es'} · ${r.hooks.length} sourced hook${r.hooks.length === 1 ? '' : 's'} · ${Claude.formatCost(r.cost)}`;
+        return x;
+      });
+    } else {
+      await Sessions.update(key, x => {
+        x.research = { source: 'profile', at: Date.now() };
+        x.hooks = local.map((h, i) => ({ ...h, selected: i < 2 }));
+        x.steps.research = 'done';
+        return x;
+      });
+    }
   }
 
-  await write(key, { ...options, mode }, settings);
+  const after = await Sessions.get(key);
+  await write(key, { ...options, mode, researchCost: deep ? after.research?.cost || 0 : 0 }, settings);
 }
 
 async function jobWrite({ key, options }) {
-  const settings = await requireKey();
+  const settings = await getSettings();
   const s = await Sessions.get(key);
   if (!s?.profile) throw new Error('Read the profile first.');
   await write(key, options, settings);
@@ -166,70 +180,84 @@ async function write(key, options = {}, settings) {
     return x;
   });
 
-  const s       = await Sessions.get(key);
-  const useDeep = options.mode === 'deep' && s.research;
-  const current = s.versions[s.active];
-  const hooks   = (s.hooks || []).filter(h => h.selected).map(h => h.text);
+  const s        = await Sessions.get(key);
+  const useDeep  = options.mode === 'deep' && s.research;
+  const current  = s.versions[s.active];
+  const hooks    = useDeep ? (s.hooks || []).filter(h => h.selected) : [];
+  const noteLimit = settings.noteLimit || 300;
+  const f        = Formats.get(options.format, { noteLimit });
+  const profile  = Sessions.effectiveProfile(s);
+  const useAI    = !!settings.userApiKey && !options.forceLocal;
+  const model    = settings.writerModel || 'claude-haiku-5-5';
 
-  const brief = Formats.brief({
-    format:    options.format,
-    context:   s.context,
-    shorten:   options.shorten,
-    previous:  options.shorten || options.revise ? (options.previous || current?.text) : null,
-    noteLimit: settings.noteLimit || 300,
-    hooks:     useDeep ? hooks.length : undefined,
-    commonGround: options.commonGround,
-    revise:    options.revise
-  });
-  const f = Formats.get(options.format, { noteLimit: settings.noteLimit || 300 });
-
-  const common = {
-    key:          settings.licenseKey,
-    messageType:  options.purpose || 'Networking',
-    tone:         options.tone || 'Neutral',
-    userName:     settings.userName || '',
-    userBio:      [settings.userBio, `[Message requirements]\n${brief}`].filter(Boolean).join('\n\n'),
-    resumeBase64: settings.resumeBase64 || null,
-    // Forward-compatible fields (ignored by servers that don't know them yet):
-    format:       f.id,
-    maxChars:     f.limit || f.target,
-    instructions: brief
-  };
-
-  let result;
-  if (useDeep) {
-    const profileJSON    = { ...s.research.profileJSON, ...nonEmpty(s.edits) };
-    const enrichmentJSON = { ...s.research.enrichmentJSON, topHooks: hooks };
-    result = await API.post('/api/generate/deep', { ...common, profileJSON, enrichmentJSON },
-      { timeoutMs: 90000, retries: 1, expectSuccess: true, onRetry: retryNotice(key) });
+  let text, cost = 0, engine;
+  if (useAI) {
+    const requirements = Formats.brief({
+      format:    options.format,
+      context:   s.context,
+      shorten:   options.shorten,
+      previous:  options.shorten || options.revise ? (options.previous || current?.text) : null,
+      noteLimit,
+      hooks:     useDeep ? hooks.length : undefined,
+      commonGround: options.commonGround,
+      revise:    options.revise
+    });
+    const body = Prompts.writerBody({
+      model, profile, hooks,
+      common: options.commonGround,
+      sender: { name: settings.userName, bio: settings.userBio, profile: settings.myProfile },
+      purpose: options.purpose || 'Networking',
+      tone: options.tone || 'Neutral',
+      requirements,
+      resumeBase64: settings.resumeBase64 || null
+    });
+    const data = await Claude.create(settings.userApiKey, body, { timeoutMs: 60000, retries: 2, betas: Prompts.betasFor(model), onRetry: retryNotice(key) });
+    text = Claude.textOf(data);
+    cost = Claude.cost(model, data.usage);
+    engine = model;
+    if (settings.keyStatus?.status !== 'valid') setKeyStatus({ status: 'valid' });
   } else {
-    result = await API.post('/api/generate/quick', { ...common, profileData: Sessions.effectiveProfile(s) },
-      { timeoutMs: 60000, retries: 1, expectSuccess: true, onRetry: retryNotice(key) });
+    text = LocalWriter.write({
+      profile,
+      sender: { name: settings.userName, bio: settings.userBio },
+      common: options.commonGround,
+      hooks,
+      purpose: options.purpose || 'Networking',
+      tone: options.tone || 'Neutral',
+      format: f.id,
+      noteLimit,
+      variant: s.versions.length,
+      shorten: options.shorten
+    });
+    engine = 'local';
   }
 
-  const text = String(result.message || '').trim();
-  if (!text) throw new Error('The server returned an empty message. Please try again.');
+  text = String(text || '').trim().replace(/^["“]|["”]$/g, '');
+  if (!text) throw new Error('Nothing was written. Please try again.');
 
   const done = await Sessions.update(key, x => {
     x.versions.push({
       id: Date.now().toString(36),
       text, format: f.id,
-      purpose: common.messageType, tone: common.tone,
+      purpose: options.purpose || 'Networking', tone: options.tone || 'Neutral',
       mode: useDeep ? 'deep' : 'quick',
-      hooks: useDeep ? hooks : [],
+      hooks: hooks.map(h => h.text),
       commonGround: options.commonGround || [],
       revised: !!options.revise,
+      engine, cost,
       createdAt: Date.now()
     });
     if (x.versions.length > 12) x.versions.shift();
     x.active = x.versions.length - 1;
     x.stage = 'done';
     x.steps.write = 'done';
-    x.notice = `Written in ${Math.max(1, Math.round((Date.now() - (x.startedAt || Date.now())) / 1000))}s`;
+    const secs = Math.max(1, Math.round((Date.now() - (x.startedAt || Date.now())) / 1000));
+    const researchCost = options.researchCost || 0; // set when research ran in this same job
+    x.notice = engine === 'local'
+      ? 'Written on your device · free mode'
+      : `Written in ${secs}s · ${Claude.MODELS[engine] || engine} · ${Claude.formatCost(cost + researchCost)}`;
     return x;
   });
-
-  if (typeof result.remaining === 'number') await setLicense({ remaining: result.remaining, status: 'valid' });
 
   const p = Sessions.effectiveProfile(done) || {};
   await ContactStore.upsert({
@@ -242,16 +270,19 @@ async function write(key, options = {}, settings) {
     signals: {
       mode:   useDeep ? 'deep' : 'quick',
       format: f.id,
-      tone:   common.tone,
-      hooks:  useDeep ? hooks.length : 0,
-      common: (options.commonGround || []).length
+      tone:   options.tone || 'Neutral',
+      hooks:  hooks.length,
+      common: (options.commonGround || []).length,
+      engine
     }
   });
 }
 
 function retryNotice(key) {
   return (attempt, err) => Sessions.update(key, x => {
-    x.notice = err.code === 'network' ? `Connection hiccup — retrying (${attempt})…` : `Server is waking up — retrying (${attempt})…`;
+    x.notice = err.code === 'network' ? `Connection hiccup, retrying (${attempt})…`
+      : err.code === 'rate_limit' ? `Rate limited by Anthropic, retrying (${attempt})…`
+      : `Anthropic is busy, retrying (${attempt})…`;
     return x;
   });
 }
@@ -269,17 +300,6 @@ function failSteps(s, message, code) {
   return s;
 }
 
-function extractHooks(enrichment) {
-  if (!enrichment) return [];
-  const raw = Array.isArray(enrichment.topHooks) && enrichment.topHooks.length
-    ? enrichment.topHooks
-    : (enrichment.companyNews || []).map(n => n?.relevance || n?.headline);
-  return [...new Set(raw.map(h => (typeof h === 'string' ? h : h?.text || h?.hook || '')).map(t => t.trim()).filter(Boolean))].slice(0, 6);
-}
-
-function nonEmpty(obj) {
-  return Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => (Array.isArray(v) ? v.length : v && String(v).trim())));
-}
 
 // ─── Session patches from the panel (UI-owned fields only) ────────────────────
 const PATCHABLE = ['edits', 'context', 'hooks', 'versions', 'active', 'commonPicks', 'checks'];
@@ -391,43 +411,40 @@ function bioFrom(p) {
   return parts.join('. ').replace(/\.\./g, '.').slice(0, 400);
 }
 
-// ─── License ──────────────────────────────────────────────────────────────────
-async function validateKey(rawKey) {
-  const key = (rawKey || '').trim().toUpperCase();
-  if (!key) throw new Error('Enter a license key.');
-  let license;
+// ─── The user's own Anthropic API key (optional) ──────────────────────────────
+async function testKey(rawKey) {
+  const key = (rawKey || '').trim();
+  if (!key) throw new Error('Paste your Anthropic API key first.');
+  let status;
   try {
-    const d = await API.post('/api/validate', { key }, { timeoutMs: 20000, retries: 1 });
-    license = d.valid
-      ? { status: 'valid', remaining: d.remaining, reason: null }
-      : { status: 'invalid', reason: d.reason || 'That key isn’t valid.' };
+    const data = await Claude.create(key, {
+      model: 'claude-haiku-5-5', max_tokens: 1024, output_config: { effort: 'low' },
+      messages: [{ role: 'user', content: 'Reply with the single word: OK' }]
+    }, { timeoutMs: 20000, retries: 1 });
+    Claude.textOf(data);
+    status = { status: 'valid' };
   } catch (err) {
-    license = { status: err.code === 'auth' ? 'invalid' : 'unknown', reason: err.message };
+    status = { status: ['auth', 'permission', 'billing'].includes(err.code) ? 'invalid' : 'unknown', reason: err.message, code: err.code };
   }
-  license = { ...license, key, checkedAt: Date.now() };
-  const save = { license };
-  if (license.status === 'valid') save.licenseKey = key;
+  status = { ...status, fingerprint: fingerprint(key), checkedAt: Date.now() };
+  const save = { keyStatus: status };
+  if (status.status !== 'invalid') save.userApiKey = key;
   await chrome.storage.local.set(save);
-  return { license };
+  return { keyStatus: status };
 }
 
-async function setLicense(fields) {
-  const { license = {}, licenseKey } = await chrome.storage.local.get(['license', 'licenseKey']);
-  await chrome.storage.local.set({ license: { ...license, key: licenseKey, checkedAt: Date.now(), ...fields } });
+// Lets the panel know which key a status belongs to without storing the key twice.
+function fingerprint(key) {
+  return key ? `${key.slice(0, 7)}…${key.slice(-4)}` : '';
+}
+
+async function setKeyStatus(fields) {
+  const { keyStatus = {}, userApiKey } = await chrome.storage.local.get(['keyStatus', 'userApiKey']);
+  await chrome.storage.local.set({ keyStatus: { ...keyStatus, fingerprint: fingerprint(userApiKey), checkedAt: Date.now(), ...fields } });
 }
 
 async function getSettings() {
   return chrome.storage.local.get(SETTINGS_KEYS);
-}
-
-async function requireKey() {
-  const s = await getSettings();
-  if (!s.licenseKey) {
-    const e = new Error('No license key yet. Add it in Settings.');
-    e.code = 'no_key';
-    throw e;
-  }
-  return s;
 }
 
 // ─── Follow-up reminders ──────────────────────────────────────────────────────

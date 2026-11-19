@@ -2,14 +2,14 @@
 
 // sidepanel.js — the UI. A view over two stores:
 //   chrome.storage.session  "sess:<slug>"  per-profile work (owned by background.js)
-//   chrome.storage.local    settings, license, contacts
+//   chrome.storage.local    settings, optional API key, contacts
 // The panel never runs jobs itself. It sends intents to the background and
 // re-renders when storage changes, so it can close and reopen at any moment.
 
 const $  = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const SETTINGS_KEYS = ['licenseKey', 'userName', 'userBio', 'resumeFileName', 'license', 'prefs',
+const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed'];
 const DEFAULT_PREFS = { purpose: 'Networking', tone: 'Neutral', format: 'note', mode: 'quick' };
 
@@ -40,11 +40,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   renderSettingsForm();
   renderOptions();
-  renderQuota();
+  renderModeChip();
   renderTracker();
   await refreshTab();
   maybeOnboard();
-  maybeRevalidate();
 
   chrome.storage.onChanged.addListener(onStorageChanged);
   if (!state.pinnedTabId) {
@@ -96,8 +95,8 @@ function onStorageChanged(changes, area) {
   }
   if (touched) {
     if (changes.theme) applyTheme();
-    if (changes.license || changes.licenseKey) { renderQuota(); renderKeyStatus(); }
-    if (changes.licenseKey) revalidateSoon();
+    if (changes.keyStatus || changes.userApiKey || changes.writerModel) { renderModeChip(); renderKeyStatus(); renderOptions(); }
+    if (changes.userApiKey) testSoon();
     if (changes.myProfile) renderMe();
     if (changes.userName || changes.userBio) syncAboutFields();
     renderCompose();
@@ -133,7 +132,7 @@ async function refreshTab({ navigated = false } = {}) {
 function wireTabs() {
   $$('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   $$('[data-goto]').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.goto)));
-  $('quota-chip').addEventListener('click', () => switchTab('settings'));
+  $('mode-chip').addEventListener('click', () => switchTab('settings'));
 }
 
 function switchTab(name) {
@@ -212,6 +211,7 @@ function wireCompose() {
   $('regen-btn').addEventListener('click', () => onPrimary({ another: true }));
   $('shorten-btn').addEventListener('click', () => onPrimary({ another: true, shorten: true }));
   $('error-action').addEventListener('click', onErrorAction);
+  $('error-free').addEventListener('click', writeLocally);
 
   $('fit-btn').addEventListener('click', () => {
     const v = activeVersion();
@@ -248,12 +248,6 @@ function currentOptions(extra = {}) {
 
 async function onPrimary({ another = false, shorten = false } = {}) {
   if (!state.key || !state.tab) return;
-  if (!state.settings.licenseKey) {
-    toast('Add your license key first.', { type: 'error' });
-    switchTab('settings');
-    $('license-key').focus();
-    return;
-  }
   const s = state.session;
   if (Sessions.isBusy(s)) return;
 
@@ -268,10 +262,23 @@ async function onPrimary({ another = false, shorten = false } = {}) {
   if (!r.ok) toast(r.error, { type: 'error' });
 }
 
+const KEY_ERRORS = ['auth', 'billing', 'permission', 'model', 'no_key'];
 function onErrorAction() {
   const code = state.session?.errorCode;
-  if (code === 'auth' || code === 'no_key') { switchTab('settings'); $('license-key').focus(); return; }
+  if (KEY_ERRORS.includes(code)) { switchTab('settings'); $('api-key').focus(); return; }
   onPrimary();
+}
+
+// When Claude can't be used (bad key, no credit, outage), write this one for free instead.
+async function writeLocally() {
+  if (!state.key || !state.tab) return;
+  const p = prefs();
+  const s = state.session;
+  const options = currentOptions({ forceLocal: true });
+  const r = s?.profile?.full && !(p.mode === 'deep' && !s.research)
+    ? await send({ type: 'WRITE', key: state.key, tabId: state.tab.id, options })
+    : await send({ type: 'GENERATE', key: state.key, tabId: state.tab.id, mode: p.mode, options });
+  if (!r.ok) toast(r.error, { type: 'error' });
 }
 
 function patchSession(patch) {
@@ -289,11 +296,14 @@ function renderOptions() {
   setSegmented('opt-mode', p.mode);
   const f = Formats.get(p.format, { noteLimit: noteLimit() });
   $('format-hint').textContent = f.desc;
+  $('mode-hint').textContent = p.mode === 'deep'
+    ? (hasAI() ? 'Deep: Claude searches the web for recent news and public work, with a link for every hook (about $0.02 to $0.05).'
+               : 'Deep: picks hooks from their profile. Add an API key in Settings for web research.')
+    : '';
+  $('mode-hint').classList.toggle('hidden', p.mode !== 'deep');
 }
 
 function renderCompose() {
-  const hasKey = !!state.settings.licenseKey;
-  $('no-key-banner').classList.toggle('hidden', hasKey || !state.settings.onboarded);
   const onProfile = !!state.key;
   $('no-profile').classList.toggle('hidden', onProfile);
   $('compose').classList.toggle('hidden', !onProfile);
@@ -389,6 +399,12 @@ function renderHooks(s) {
     });
     const span = document.createElement('span');
     span.textContent = h.text;
+    if (h.url) {
+      const a = el('a', 'hook-src', hostOf(h.url) + (h.date ? ` · ${h.date}` : ''));
+      a.href = h.url; a.target = '_blank'; a.rel = 'noopener';
+      a.title = h.title || h.url;
+      span.append(' ', a);
+    }
     label.append(cb, span);
     list.appendChild(label);
   });
@@ -399,7 +415,8 @@ function renderError(s) {
   $('error-banner').classList.toggle('hidden', !show);
   if (!show) return;
   $('error-text').textContent = s.error;
-  $('error-action').textContent = (s.errorCode === 'auth' || s.errorCode === 'no_key') ? 'Open Settings' : 'Try again';
+  $('error-action').textContent = KEY_ERRORS.includes(s.errorCode) ? 'Open Settings' : 'Try again';
+  $('error-free').classList.toggle('hidden', !hasAI() || s.errorCode === 'no_profile');
 }
 
 function renderPrimary(s) {
@@ -688,13 +705,20 @@ function exportCSV() {
 function wireSettings() {
   const flash = savedFlash();
 
-  $('license-key').addEventListener('input', debounce(async (e) => {
-    const licenseKey = e.target.value.trim().toUpperCase();
-    await chrome.storage.local.set({ licenseKey });
+  $('api-key').addEventListener('input', debounce(async (e) => {
+    const userApiKey = e.target.value.trim();
+    await chrome.storage.local.set({ userApiKey });
     flash();
   }, 400));
-  $('license-key').addEventListener('keydown', e => { if (e.key === 'Enter') verifyKey($('license-key'), $('validate-btn')); });
-  $('validate-btn').addEventListener('click', () => verifyKey($('license-key'), $('validate-btn')));
+  $('api-key').addEventListener('keydown', e => { if (e.key === 'Enter') testKey($('api-key'), $('test-key-btn'), $('key-status')); });
+  $('test-key-btn').addEventListener('click', () => testKey($('api-key'), $('test-key-btn'), $('key-status')));
+  $('key-show').addEventListener('click', () => { const i = $('api-key'); i.type = i.type === 'password' ? 'text' : 'password'; });
+  $('remove-key').addEventListener('click', async () => {
+    await chrome.storage.local.remove(['userApiKey', 'keyStatus']);
+    $('api-key').value = '';
+    toast('Key removed. Back to free mode.');
+  });
+  $('set-model').addEventListener('change', async e => { await chrome.storage.local.set({ writerModel: e.target.value }); flash(); });
 
   $('user-name').addEventListener('input', debounce(async e => { await chrome.storage.local.set({ userName: e.target.value.trim() }); flash(); }, 400));
   $('user-bio').addEventListener('input', e => { renderBioCount(); bioSave(e.target.value); });
@@ -725,7 +749,8 @@ function wireSettings() {
 
 function renderSettingsForm() {
   const s = state.settings;
-  $('license-key').value = s.licenseKey || '';
+  $('api-key').value = s.userApiKey || '';
+  $('set-model').value = s.writerModel || 'claude-haiku-5-5';
   $('user-name').value = s.userName || '';
   $('user-bio').value = s.userBio || '';
   renderBioCount();
@@ -774,88 +799,89 @@ function saveResume(file) {
   reader.readAsDataURL(file);
 }
 
-async function verifyKey(input, btn, statusEl = $('key-status')) {
-  const key = input.value.trim().toUpperCase();
+// ─── API key (optional) ───────────────────────────────────────────────────────
+function fingerprint(key) {
+  return key ? `${key.slice(0, 7)}…${key.slice(-4)}` : '';
+}
+
+function hasAI() { return !!state.settings.userApiKey; }
+
+async function testKey(input, btn, statusEl) {
+  const key = input.value.trim();
   if (!key) { input.focus(); return null; }
-  input.value = key;
   btn.disabled = true;
   const prev = btn.textContent;
-  btn.textContent = 'Checking…';
-  const r = await send({ type: 'VALIDATE_KEY', key });
+  btn.textContent = 'Testing…';
+  const r = await send({ type: 'TEST_KEY', key });
   btn.disabled = false;
   btn.textContent = prev;
-  const lic = r.license || { status: 'unknown', reason: r.error };
-  if (lic.status === 'unknown') await chrome.storage.local.set({ licenseKey: key }); // offline: keep it, verify later
-  showKeyStatus(statusEl, lic);
-  return lic;
+  const ks = r.keyStatus || { status: 'unknown', reason: r.error };
+  showKeyStatus(statusEl, ks);
+  return ks;
 }
 
 function renderKeyStatus() {
-  const s = state.settings;
-  const lic = s.license;
-  if (!s.licenseKey || !lic || lic.key !== s.licenseKey) { $('key-status').classList.add('hidden'); return; }
-  showKeyStatus($('key-status'), lic);
+  const { userApiKey, keyStatus } = state.settings;
+  $('remove-key').classList.toggle('hidden', !userApiKey);
+  const statusEl = $('key-status');
+  if (!userApiKey || !keyStatus || keyStatus.fingerprint !== fingerprint(userApiKey)) statusEl.classList.add('hidden');
+  else showKeyStatus(statusEl, keyStatus);
+  const model = Claude.MODELS[state.settings.writerModel || 'claude-haiku-5-5'];
+  $('engine-state').innerHTML = '';
+  $('engine-state').append(
+    el('span', `engine-pill ${userApiKey ? 'ai' : 'free'}`, userApiKey ? `AI mode · Claude ${model}` : 'Free mode'),
+    el('span', 'muted', userApiKey ? ' Claude writes, Deep mode searches the web.' : ' Written on your device, no key needed.')
+  );
 }
 
-function showKeyStatus(elm, lic) {
+function showKeyStatus(elm, ks) {
   elm.classList.remove('hidden');
-  elm.dataset.status = lic.status;
-  elm.textContent = lic.status === 'valid'
-    ? `✓ Valid key${typeof lic.remaining === 'number' ? ` · ${lic.remaining} messages left today` : ''}`
-    : lic.status === 'invalid' ? `✗ ${lic.reason || 'Invalid key'}` : `⚠ ${lic.reason || 'Couldn’t verify right now.'} Saved; we’ll retry.`;
+  elm.dataset.status = ks.status;
+  elm.textContent = ks.status === 'valid' ? '✓ Key works. AI mode is on.'
+    : ks.status === 'invalid' ? `✗ ${ks.reason || 'That key didn’t work.'}`
+    : `⚠ ${ks.reason || 'Couldn’t check the key right now.'} Saved; it’ll be used on the next message.`;
 }
 
-function maybeRevalidate() {
-  const { licenseKey, license } = state.settings;
-  if (!licenseKey) return;
-  const stale = !license || license.key !== licenseKey || Date.now() - (license.checkedAt || 0) > 6 * 3600e3;
-  if (stale && license?.status !== 'invalid') send({ type: 'VALIDATE_KEY', key: licenseKey });
-}
-
-// A changed key gets checked once the user stops typing.
-const revalidateSoon = debounce(() => {
-  const { licenseKey, license } = state.settings;
-  if (licenseKey && licenseKey.length >= 10 && license?.key !== licenseKey) send({ type: 'VALIDATE_KEY', key: licenseKey });
-}, 1200);
-
-function renderQuota() {
-  const chip = $('quota-chip');
-  const { licenseKey, license } = state.settings;
+function renderModeChip() {
+  const chip = $('mode-chip');
+  const { userApiKey, keyStatus, writerModel } = state.settings;
   let text, cls, title;
-  if (!licenseKey) { text = 'No key'; cls = 'bad'; title = 'Add your license key in Settings'; }
-  else if (!license || license.key !== licenseKey || license.status === 'unknown') { text = 'Key saved'; cls = 'neutral'; title = 'Not verified yet'; }
-  else if (license.status === 'invalid') { text = 'Key invalid'; cls = 'bad'; title = license.reason || ''; }
-  else if (typeof license.remaining === 'number') {
-    text = license.remaining > 0 ? `${license.remaining} left today` : 'Limit reached';
-    cls = license.remaining > 3 ? 'good' : license.remaining > 0 ? 'warn' : 'bad';
-    title = 'Messages remaining today on your license';
-  } else { text = 'Active'; cls = 'good'; title = 'License verified'; }
+  if (!userApiKey) { text = 'Free mode'; cls = 'neutral'; title = 'Written on your device. Add an API key in Settings for AI mode.'; }
+  else if (keyStatus?.status === 'invalid' && keyStatus.fingerprint === fingerprint(userApiKey)) { text = 'Key problem'; cls = 'bad'; title = keyStatus.reason || ''; }
+  else { text = `AI · ${Claude.MODELS[writerModel || 'claude-haiku-5-5']}`; cls = 'good'; title = 'Claude writes with your API key'; }
   chip.textContent = text;
-  chip.className = `quota-chip ${cls}`;
+  chip.className = `status-chip ${cls}`;
   chip.title = title;
 }
 
+// A pasted key gets tested once the user stops typing.
+const testSoon = debounce(() => {
+  const { userApiKey, keyStatus } = state.settings;
+  if (userApiKey && userApiKey.length > 30 && keyStatus?.fingerprint !== fingerprint(userApiKey)) testKey($('api-key'), $('test-key-btn'), $('key-status'));
+}, 1200);
+
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 function maybeOnboard() {
-  if (state.settings.onboarded || state.settings.licenseKey) return;
+  if (state.settings.onboarded) return;
   $('onboarding').classList.remove('hidden');
-  setTimeout(() => $('ob-key').focus(), 50);
+  setTimeout(() => $('ob-free').focus(), 50);
 }
 
 function obStep(n) {
   $$('.ob-step').forEach(s => s.classList.toggle('hidden', s.dataset.ob !== String(n)));
   $$('.ob-dots span').forEach((d, i) => d.classList.toggle('active', i < n));
-  const focusable = { 1: 'ob-key', 2: 'ob-name', 3: 'ob-done' }[n];
+  const focusable = { 1: 'ob-free', 2: 'ob-name', 3: 'ob-done' }[n];
   setTimeout(() => $(focusable)?.focus(), 30);
 }
 
 function wireOnboarding() {
-  const verify = async () => {
-    const lic = await verifyKey($('ob-key'), $('ob-verify'), $('ob-key-status'));
-    if (lic && lic.status !== 'invalid') setTimeout(() => obStep(2), lic.status === 'valid' ? 700 : 1400);
+  const test = async () => {
+    const ks = await testKey($('ob-key'), $('ob-test'), $('ob-key-status'));
+    if (ks && ks.status !== 'invalid') setTimeout(() => obStep(2), ks.status === 'valid' ? 700 : 1400);
   };
-  $('ob-verify').addEventListener('click', verify);
-  $('ob-key').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
+  $('ob-test').addEventListener('click', test);
+  $('ob-key').addEventListener('keydown', e => { if (e.key === 'Enter') test(); });
+  $('ob-free').addEventListener('click', () => obStep(2));
   $('ob-name').value = state.settings.userName || '';
   $('ob-bio').value = state.settings.userBio || '';
   $('ob-import').addEventListener('click', () => importMe($('ob-import')));
@@ -965,8 +991,7 @@ function runCheck() {
   const profile = Sessions.effectiveProfile(s);
   const grounding = Grounding.check(text, {
     profile,
-    research: s.research,
-    hooks: (s.hooks || []).map(h => h.text),
+    hooks: s.hooks || [],
     common: commonFor(s),
     userBio: state.settings.userBio,
     userName: state.settings.userName,
@@ -1049,7 +1074,8 @@ function renderCheck() {
   $('lint-section').classList.toggle('hidden', !lint.filter(x => !x.hidden).length);
 
   const fixable = g.unverified || errors || lint.some(i => i.level === 'warn' && !i.hidden) || lint.some(i => i.id === 'no-ask' || i.id === 'me-me-me');
-  $('fix-ai-btn').disabled = !fixable || Sessions.isBusy(state.session);
+  $('fix-ai-btn').disabled = !fixable || !hasAI() || Sessions.isBusy(state.session);
+  $('fix-ai-btn').title = hasAI() ? 'Rewrite with these fixes' : 'Add an Anthropic API key in Settings to fix with AI';
 
   renderBackdrop(c);
 }
@@ -1156,6 +1182,10 @@ function renderInsights() {
   } else {
     box.appendChild(el('div', 'ins-line muted', 'No clear pattern yet. Keep marking replies.'));
   }
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return 'source'; }
 }
 
 function listOf(items) {

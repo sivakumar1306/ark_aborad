@@ -33,7 +33,7 @@ const Grounding = (() => {
     'Saw Noticed Really Great Happy Glad Hope Let Lets Let\'s Also Just Quick Subject Re PS P.S. Sorry Excited Curious ' +
     'Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September ' +
     'October November December LinkedIn Linkedin InMail DM Ok OK Yes No So And But Or If When While As After Before Since ' +
-    "I'm I've I'd I'll Im Ive"
+    "I'm I've I'd I'll Im Ive Fellow From Question Questions Hello Quick"
   ).split(' '));
 
   // Event claims that need evidence. Each group lists stems that count as evidence.
@@ -77,7 +77,7 @@ const Grounding = (() => {
   /**
    * Build the evidence list. Each source: { id, owner: 'them'|'me'|'both'|'research', label, text }.
    */
-  function buildSources({ profile, research, hooks, common, userBio, myProfile }) {
+  function buildSources({ profile, hooks, common, userBio, myProfile }) {
     const out = [];
     const add = (owner, label, text) => {
       const t = Array.isArray(text) ? text.filter(Boolean).join(' · ') : text;
@@ -95,12 +95,13 @@ const Grounding = (() => {
     add('them', 'Their skills', p.skills);
     add('them', 'Their past companies', p.pastCompanies);
 
-    const r = research || {};
-    const pj = r.profileJSON || {};
-    add('research', 'Research summary', [pj.headline, pj.summary, pj.currentCompany].filter(Boolean));
-    (hooks || []).forEach(h => add('research', 'Research hook', typeof h === 'string' ? h : h.text));
-    (r.enrichmentJSON?.companyNews || []).forEach(n => add('research', 'Company news', [n?.headline, n?.relevance, n?.summary].filter(Boolean)));
-    (r.enrichmentJSON?.publicWork || []).forEach(w => add('research', 'Public work', typeof w === 'string' ? w : [w?.title, w?.summary]));
+    // Research hooks: from web search (with the page they came from) or from the profile.
+    (hooks || []).forEach(h => {
+      if (typeof h === 'string') return add('research', 'Research hook', h);
+      let label = 'Profile hook';
+      if (h.url) { try { label = `Web: ${new URL(h.url).hostname.replace(/^www\./, '')}`; } catch (_) { label = 'Web research'; } }
+      add('research', label, [h.text, h.title].filter(Boolean));
+    });
 
     (common || []).forEach(c => add('both', 'Shared background', [c.text, c.detail].filter(Boolean)));
 
@@ -144,7 +145,7 @@ const Grounding = (() => {
     const ignore = new Set(ignoreNames.map(norm).filter(Boolean));
 
     // Proper-noun phrases: runs of Capitalised / ACRONYM / mixedCase tokens, allowing "of", "&", "de".
-    const tokens = [...text.matchAll(/[A-Za-z0-9][\w&+#.'’-]*/g)].map(m => ({ w: m[0].replace(/[.'’]+$/, ''), i: m.index }));
+    const tokens = [...text.matchAll(/[A-Za-z0-9][\w&+#.'’-]*/g)].map(m => ({ w: m[0].replace(/’/g, "'").replace(/[.']+$/, ''), i: m.index }));
     let run = [];
     const flush = () => {
       while (run.length && /^(of|and|&|de|for|the)$/i.test(run[run.length - 1].w)) run.pop();
@@ -156,9 +157,11 @@ const Grounding = (() => {
         const allIgnored = run.every(t => ignore.has(norm(t.w)) || COMMON_CAPS.has(t.w));
         if (!allIgnored && !ignore.has(n) && n.length > 1) {
           // Trim leading grammar-caps ("Congrats Lumen Analytics" → "Lumen Analytics").
-          const firstReal = run.findIndex(t => !COMMON_CAPS.has(t.w) && !ignore.has(norm(t.w)));
-          const kept = run.slice(firstReal).map(t => t.w).filter(w => !ignore.has(norm(w)));
-          if (kept.length) claims.push({ kind: 'name', value: kept.join(' ') });
+          const CONNECT = /^(of|and|&|de|for|the)$/i;
+          const firstReal = run.findIndex(t => !COMMON_CAPS.has(t.w) && !ignore.has(norm(t.w)) && !CONNECT.test(t.w));
+          let kept = firstReal < 0 ? [] : run.slice(firstReal).map(t => t.w).filter(w => !ignore.has(norm(w)));
+          while (kept.length && (CONNECT.test(kept[kept.length - 1]) || COMMON_CAPS.has(kept[kept.length - 1]))) kept.pop();
+          if (kept.some(w => !COMMON_CAPS.has(w) && !CONNECT.test(w))) claims.push({ kind: 'name', value: kept.join(' ') });
         }
       }
       run = [];

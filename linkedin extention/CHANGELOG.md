@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.0: Built on upstream v3.1 (no license key, no company server)
+
+- **Free mode (default):** a new on-device writer. It uses only profile facts, opens with common ground or their post, fits the 200/300 note limit, and varies between versions. Replaces upstream's fixed "I came across your profile…" template.
+- **AI mode:** optional, with the user's own Anthropic API key. Claude Haiku 5.5 by default (Sonnet 5.5 selectable), with a structured prompt and a no-invention rule. The cost is shown after every message.
+- **Deep mode in AI mode:** web research with Claude Sonnet 5.5 + `web_search_20260209`. Each hook links its source; hooks whose URL wasn't in the search results are dropped; `pause_turn` is resumed; refusal fallback is enabled.
+- **API client:** timeouts, retries for 429/529/5xx honouring `retry-after`, refusal and truncation handling, plain-English errors (bad key, no credit, rate limit, overload).
+- "Write in free mode" recovery on any AI error; the key is tested before it's saved; the mode chip replaces the license chip.
+- Resume is sent to Claude as a PDF document block (AI mode).
+- Fixed: an ended internship at the top of the experience section was treated as the current job.
+- Fixed: fact-check false alarms on curly apostrophes and "I’m <name> and I’d…".
+- Removed the license key, the quota UI and the Railway server permission; the host permission is now `api.anthropic.com`.
+
 ## 4.1.0: Trust layer
 
 - **Fact check:** every sentence's claims (names, numbers, events) are checked against the profile, research, shared background and your own data. Highlights appear inside the message, with sources; re-checks run live while editing.
