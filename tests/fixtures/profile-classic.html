@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>(3) Priya Sharma | LinkedIn</title>
+<style>
+ body{font-family:system-ui;margin:0;background:#f4f2ee} main{max-width:760px;margin:20px auto} section{background:#fff;margin:10px 0;padding:16px 20px;border-radius:8px}
+ .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)} ul{list-style:none;padding:0} li{padding:8px 0;border-top:1px solid #eee}
+ [role=dialog]{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#fff;padding:20px;box-shadow:0 4px 30px #0003;border-radius:8px;width:480px;display:none}
+ [role=dialog].open{display:block} textarea{width:100%;height:110px} .lazy{min-height:400px}
+ .msg-overlay{position:fixed;right:20px;bottom:0;width:320px;background:#fff;box-shadow:0 0 10px #0003;display:none;padding:10px} .msg-overlay.open{display:block}
+ .msg-form__contenteditable{min-height:80px;border:1px solid #ccc;padding:6px}
+</style></head>
+<body>
+<main>
+  <section class="artdeco-card">
+    <div class="ph5">
+      <h1 class="text-heading-xlarge">Priya Sharma</h1>
+      <div class="text-body-medium break-words">Senior ML Engineer at Lumen Analytics | Feature stores · MLOps</div>
+      <span class="text-body-small inline t-black--light break-words">Berlin, Germany</span>
+      <span>500+ connections</span>
+      <button id="connect">Connect</button>
+      <button id="message">Message</button>
+    </div>
+  </section>
+
+  <section class="artdeco-card"><div id="about"></div>
+    <h2><span aria-hidden="true">About</span><span class="visually-hidden">About</span></h2>
+    <div><span aria-hidden="true">I build the plumbing that turns messy data into reliable ML features. Currently leading the feature platform at Lumen, previously shipped recommendation systems at Zalando. I care about mentoring new engineers and open source.</span><span class="visually-hidden">I build the plumbing…</span></div>
+  </section>
+
+  <section class="artdeco-card"><div id="activity"></div>
+    <h2><span aria-hidden="true">Activity</span></h2>
+    <ul>
+      <li><span aria-hidden="true">We're hiring two junior ML engineers in Berlin! If you love data quality and want a mentor-heavy team, send me a message.</span><span aria-hidden="true">12 comments</span></li>
+      <li><span aria-hidden="true">Slides from my PyData Berlin talk on building feature stores without a platform team are up. Thanks to everyone who came!</span></li>
+    </ul>
+  </section>
+
+  <div class="lazy" id="lazy-holder"></div>
+
+  <div style="height:1800px"></div>
+</main>
+
+<div role="dialog" id="invite">
+  <h2>Add a note to your invitation</h2>
+  <textarea id="custom-message" name="message" maxlength="300"></textarea>
+  <button>Send</button>
+</div>
+
+<div class="msg-overlay" id="msgbox">
+  <div class="msg-form__contenteditable" contenteditable="true" role="textbox"></div>
+</div>
+
+<script>
+  // Experience/Education/Skills render lazily on scroll, like LinkedIn.
+  let rendered = false;
+  window.addEventListener('scroll', () => {
+    if (rendered || window.scrollY < 500) return;
+    rendered = true;
+    document.getElementById('lazy-holder').outerHTML = `
+    <section class="artdeco-card"><div id="experience"></div>
+      <h2><span aria-hidden="true">Experience</span></h2>
+      <ul>
+        <li class="artdeco-list__item">
+          <span aria-hidden="true">Lumen Analytics</span>
+          <span aria-hidden="true">Full-time · 3 yrs 4 mos</span>
+          <ul>
+            <li><span aria-hidden="true">Senior ML Engineer</span><span aria-hidden="true">Jan 2024 - Present · 1 yr 11 mos</span><span aria-hidden="true">Berlin, Germany · Hybrid</span></li>
+            <li><span aria-hidden="true">ML Engineer</span><span aria-hidden="true">Aug 2022 - Dec 2023 · 1 yr 5 mos</span></li>
+          </ul>
+        </li>
+        <li class="artdeco-list__item">
+          <span aria-hidden="true">Data Scientist</span>
+          <span aria-hidden="true">Zalando · Full-time</span>
+          <span aria-hidden="true">Mar 2019 - Jul 2022 · 3 yrs 5 mos</span>
+          <span aria-hidden="true">Berlin, Germany</span>
+          <span aria-hidden="true">Built the size-recommendation model used across 23 markets, cutting returns by 4%. Led a team of three.</span>
+        </li>
+        <li class="artdeco-list__item">
+          <span aria-hidden="true">Research Intern</span>
+          <span aria-hidden="true">Max Planck Institute · Internship</span>
+          <span aria-hidden="true">2018 - 2018 · 6 mos</span>
+        </li>
+      </ul>
+    </section>
+    <section class="artdeco-card"><div id="education"></div>
+      <h2><span aria-hidden="true">Education</span></h2>
+      <ul>
+        <li><span aria-hidden="true">TU Munich</span><span aria-hidden="true">MSc, Informatics</span><span aria-hidden="true">2016 - 2018</span></li>
+        <li><span aria-hidden="true">IIT Bombay</span><span aria-hidden="true">BTech, Computer Science</span><span aria-hidden="true">2012 - 2016</span></li>
+      </ul>
+    </section>
+    <section class="artdeco-card"><div id="skills"></div>
+      <h2><span aria-hidden="true">Skills</span></h2>
+      <ul>
+        <li><span aria-hidden="true">Machine Learning</span><span aria-hidden="true">12 endorsements</span></li>
+        <li><span aria-hidden="true">Feature Engineering</span></li>
+        <li><span aria-hidden="true">Python</span></li>
+        <li><span aria-hidden="true">Apache Spark</span></li>
+      </ul>
+    </section>`;
+  });
+  document.getElementById('connect').onclick = () => document.getElementById('invite').classList.add('open');
+  document.getElementById('message').onclick = () => document.getElementById('msgbox').classList.add('open');
+</script>
+</body></html>
