@@ -519,6 +519,7 @@ async function main() {
   await panel3.click('#remove-key');
   await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'Free mode');
   check('removing the key switches to free mode', true);
+  check('no model field without a key', await panel3.isHidden('#model-field') && await panel3.isHidden('#gemini-model-field'));
   await li.goto('https://www.linkedin.com/in/priya-sharma-test/');
   await panel3.click('#tab-compose');
   await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Priya Sharma', null, { timeout: 8000 });
@@ -586,6 +587,7 @@ async function main() {
   await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'AI · Gemini 2.5 Flash');
   check('chip shows Gemini', true);
   check('Claude model picker hidden for a Gemini key', await panel3.isHidden('#model-field'));
+  check('Gemini model shown as auto-picked', (await panel3.textContent('#gemini-model-field')).includes('Gemini 2.5 Flash'));
   await panel3.click('#tab-compose');
   let gb = await panel3.textContent('#step-note');
   await panel3.click('#regen-btn');

@@ -877,7 +877,10 @@ function renderKeyStatus() {
   if (!userApiKey || !keyStatus || keyStatus.fingerprint !== fingerprint(userApiKey)) statusEl.classList.add('hidden');
   else showKeyStatus(statusEl, keyStatus);
   const gem = Gemini.isGeminiKey(userApiKey);
-  $('model-field').classList.toggle('hidden', gem);
+  // Show the model control that matches the saved key: Claude's picker, Gemini's auto-pick, or nothing.
+  $('model-field').classList.toggle('hidden', !userApiKey || gem);
+  $('gemini-model-field').classList.toggle('hidden', !gem);
+  if (gem) $('gemini-model-name').textContent = Gemini.label(state.settings.geminiModel || Gemini.FALLBACK_MODEL);
   $('engine-state').innerHTML = '';
   $('engine-state').append(
     el('span', `engine-pill ${userApiKey ? 'ai' : 'free'}`, userApiKey ? `AI mode · ${aiLabel()}` : 'Free mode'),
