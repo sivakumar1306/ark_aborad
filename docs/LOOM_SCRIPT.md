@@ -35,7 +35,7 @@ Pick three. Don't list everything:
 
 ## 3:20 Demo: the trust layer (1.5 min). This is the moment, so slow down
 1. Point at **✦ Common ground**: *"It read my profile and theirs. We both went to the same school, and it matched 'IIT Bombay' against 'Indian Institute of Technology Bombay'. That's the best opener in cold outreach, and it costs nothing."* Generate; the message opens with it.
-2. Open the **check** under the message: green highlights, each with its source. *"Every claim is backed by something it actually read."*
+2. **Click a highlighted sentence**, ideally one from web research. The evidence card shows the article it came from with a link. *"Every personal detail traces back to its source: their profile, an article, or my own bio."*
 3. Type a false claim into the message live, e.g. *"Congrats on your promotion to VP!"*. It turns amber instantly, with "Couldn't find 'VP' or 'promotion'". *"No AI call. This runs locally, so it's instant and free."*
 4. Click **✦ Fix with AI**. *"It tells the model exactly which sentence was unsupported, plus any clichés, and checks the result again."* The check goes green.
 5. Be upfront: *"It's a heuristic. It flags, it doesn't judge truth, which is why the label says 'check before sending'."*

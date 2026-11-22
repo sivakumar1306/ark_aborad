@@ -45,6 +45,16 @@ const isResearch = (e) => e.path === '/v1/messages' && (e.body.tools || []).some
 const ctxOf = (e) => JSON.parse(/<context>\s*([\s\S]*?)\s*<\/context>/.exec(textOf(e))[1]);
 const reqsOf = (e) => /<requirements>\s*([\s\S]*?)\s*<\/requirements>/.exec(textOf(e))[1];
 const lastWriter = async () => (await getLog()).filter(isWriter).pop();
+// Put the caret inside the sentence containing `needle` and click, like a user would.
+const clickInMessage = (page, needle) => page.evaluate((n) => {
+  const ta = document.getElementById('message');
+  const i = ta.value.indexOf(n);
+  if (i < 0) return false;
+  ta.focus();
+  ta.setSelectionRange(i + 1, i + 1);
+  ta.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  return true;
+}, needle);
 
 async function main() {
   const server = require('./mock-server');
@@ -199,6 +209,20 @@ async function main() {
   check('research did not re-run for rewrite', log.filter(isResearch).length === 2);
   await panel3.click('#v-prev');
   check('version navigation', (await panel3.textContent('#v-label')).trim() === '2 / 3');
+
+  console.log('\nEvidence: click a sentence');
+  check('hint tells you sentences are clickable', await panel3.isVisible('#ev-hint'));
+  check('progress steps collapse once written', !(await panel3.isVisible('#stepper')) && await panel3.isVisible('#step-note'));
+  await clickInMessage(panel3, 'Series B');
+  await panel3.waitForSelector('#evidence:not(.hidden)');
+  check('evidence card opens on click', (await panel3.textContent('#ev-title')) === 'Where this came from');
+  const ev1 = await panel3.textContent('#ev-list');
+  check('web claim traced to its article, with a link', ev1.includes('Web: techcrunch.com') && (await panel3.getAttribute('#ev-list .ev-link', 'href')).startsWith('https://techcrunch.com/'), ev1);
+  check('clicked sentence highlighted in the message', (await panel3.locator('#msg-backdrop .hl.active').count()) === 1);
+  check('hint goes away once used', !(await panel3.isVisible('#ev-hint')));
+  await shot('19-evidence', panel3);
+  await panel3.click('#ev-close');
+  check('evidence card closes', await panel3.isHidden('#evidence') && (await panel3.locator('#msg-backdrop .hl.active').count()) === 0);
 
   // ── 6. Over-limit + trim ─────────────────────────────────────────────────
   console.log('\nLimits');
@@ -376,7 +400,7 @@ async function main() {
 
   console.log('\nFact check');
   await panel3.waitForFunction(() => /claims? backed/.test(document.getElementById('check-summary').textContent));
-  check('all claims backed on a true message', /All \d+ claims? backed/.test(await panel3.textContent('#check-summary')), await panel3.textContent('#check-summary'));
+  check('all claims backed on a true message', /(All \d+ claims|^1 claim) backed/.test(await panel3.textContent('#check-summary')), await panel3.textContent('#check-summary'));
   await panel3.click('#check-toggle');
   const factText = await panel3.textContent('#facts-list');
   check('shows evidence source', factText.includes('Shared background') || factText.includes('Their'), factText);
@@ -396,6 +420,15 @@ async function main() {
   check('names the unsupported terms', flagged.includes('Google') && flagged.includes('promotion'), flagged);
   check('inline highlight on the missing term', (await panel3.locator('#msg-backdrop mark.miss').count()) >= 1);
   check('cliché flagged', (await panel3.textContent('#lint-list')).includes('I came across your profile'));
+  await clickInMessage(panel3, 'promotion');
+  await panel3.waitForSelector('#evidence[data-status="unverified"]');
+  const ev2 = await panel3.textContent('#ev-list');
+  check('clicking an invented claim says what is missing', (await panel3.textContent('#ev-title')).includes('Couldn’t verify') && ev2.includes('Google') && ev2.includes('Not found'), ev2);
+  check('…and shows what is backed in the same sentence', !ev2.includes('“Priya”'));
+  await panel3.keyboard.press('End');
+  await panel3.keyboard.type(' ');
+  check('typing closes the card (offsets change)', await panel3.isHidden('#evidence'));
+  await panel3.keyboard.press('Backspace');
   await shot('15-check-flagged', panel3);
 
   await panel3.fill('#opt-context', '');
@@ -436,6 +469,7 @@ async function main() {
   await panel3.waitForSelector('#insights:not(.hidden) .ins-big');
   const ins = await panel3.textContent('#insights');
   check('reply rate shown', ins.includes('reply rate'), ins);
+  check('small-sample caveat shown', (await panel3.textContent('#insights')).includes('treat this as a hint'));
   check('surfaces what works (common ground)', /with common ground got 50% replies vs 33% without \(4 vs 3 sent\)/.test(ins), ins);
   await shot('17-insights', panel3);
 

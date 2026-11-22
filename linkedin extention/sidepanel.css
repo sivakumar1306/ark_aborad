@@ -564,3 +564,54 @@ button.ob-choice:hover { border-color: var(--accent); background: var(--accent-s
 .ob-choice b { font-size: 13px; }
 .ob-choice span { color: var(--text-2); font-size: 12px; }
 .ob-choice .key-row { margin-top: 6px; }
+
+/* ── Evidence card: click a sentence → its source ──────────────────────────── */
+.message { cursor: text; }
+.hl.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hl.backed.active { background: color-mix(in srgb, var(--success) 18%, transparent); }
+.hl.unverified.active { background: color-mix(in srgb, var(--warning) 22%, transparent); }
+
+.ev-hint {
+  margin: -2px 12px 9px; font-size: 11.5px; color: var(--accent);
+  animation: rise .25s ease-out;
+}
+.evidence {
+  margin: 0 12px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-2); padding: 8px 10px 9px; animation: rise .18s ease-out;
+}
+.evidence[data-status="backed"] { border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+.evidence[data-status="unverified"] { border-color: var(--warning-bd); background: var(--warning-bg); }
+.ev-head { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.ev-badge {
+  width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; flex-shrink: 0; background: var(--success-bg); color: var(--success);
+}
+.evidence[data-status="unverified"] .ev-badge { background: var(--surface); color: var(--warning); }
+.ev-title { flex: 1; font-size: 12px; font-weight: 650; }
+.ev-list { list-style: none; display: grid; gap: 6px; }
+.ev-item { font-size: 12px; line-height: 1.45; padding-left: 25px; }
+.ev-terms { font-weight: 600; color: var(--text); }
+.ev-item.miss .ev-terms { color: var(--warning); }
+.ev-src { color: var(--text-2); word-break: break-word; }
+.ev-src b { font-weight: 600; color: var(--text-2); }
+.ev-link { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.ev-link:hover { text-decoration: underline; }
+
+/* ── Layout polish ─────────────────────────────────────────────────────────── */
+.options {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 12px 2px; margin-bottom: 12px; box-shadow: var(--shadow);
+}
+.options .context { margin-bottom: 10px; }
+.step-note:not(.hidden) {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 3px 10px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: 11.5px;
+}
+.step-note::before { content: '●'; font-size: 8px; color: var(--success); }
+.nudge { flex-wrap: wrap; row-gap: 4px; }
+.nudge .link { white-space: nowrap; }
+.ins-note { font-size: 11px; color: var(--text-3); margin-top: 6px; }
+
+.options .row-2 { grid-template-columns: 1.3fr 1fr; }
+.options .segmented button { padding: 5px 4px; }
+.message { min-height: 96px; }

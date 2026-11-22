@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.3.0: Evidence on click
+
+- Click any highlighted sentence in the message to see its evidence: the profile field, post or web article it came from (with a link), or exactly which words couldn't be found. The clicked sentence is outlined in the message.
+- A one-time hint shows that sentences are clickable.
+- Claim labels in the fact check now show clean values (“$40M”, “2026”), not the next word.
+- Insights say when the sample is too small to trust (under 20 sent).
+- UI: progress steps collapse into a one-line summary once a message is written; options grouped in a card; tighter message box; the common-ground nudge no longer wraps awkwardly; “Neutral” no longer truncated.
+
 ## 4.2.0: Built on upstream v3.1 (no license key, no company server)
 
 - **Free mode (default):** a new on-device writer. It uses only profile facts, opens with common ground or their post, fits the 200/300 note limit, and varies between versions. Replaces upstream's fixed "I came across your profile…" template.

@@ -79,9 +79,9 @@ const Grounding = (() => {
    */
   function buildSources({ profile, hooks, common, userBio, myProfile }) {
     const out = [];
-    const add = (owner, label, text) => {
+    const add = (owner, label, text, url) => {
       const t = Array.isArray(text) ? text.filter(Boolean).join(' · ') : text;
-      if (t && String(t).trim()) out.push({ id: out.length, owner, label, text: String(t), n: norm(t) });
+      if (t && String(t).trim()) out.push({ id: out.length, owner, label, text: String(t), n: norm(t), url: url || null });
     };
     const p = profile || {};
     add('them', 'Their name', p.name);
@@ -100,7 +100,7 @@ const Grounding = (() => {
       if (typeof h === 'string') return add('research', 'Research hook', h);
       let label = 'Profile hook';
       if (h.url) { try { label = `Web: ${new URL(h.url).hostname.replace(/^www\./, '')}`; } catch (_) { label = 'Web research'; } }
-      add('research', label, [h.text, h.title].filter(Boolean));
+      add('research', label, [h.text, h.title].filter(Boolean), h.url);
     });
 
     (common || []).forEach(c => add('both', 'Shared background', [c.text, c.detail].filter(Boolean)));
@@ -179,7 +179,9 @@ const Grounding = (() => {
     for (const m of text.matchAll(/\b\d[\d,.]*\s*(%|k\b|m\b|bn\b|x\b|\+)?(\s*[a-z]+)?/gi)) {
       if (ASK_NUMBER.test(m[0].trim())) continue;
       const num = m[0].match(/\d[\d,.]*/)[0].replace(/[.,]$/, '');
-      claims.push({ kind: 'number', value: num, display: m[0].trim() });
+      // Show "$40M" / "23%" / "2026", not the word that happens to follow.
+      const display = ((m.index > 0 && text[m.index - 1] === '$') ? '$' : '') + (m[0].match(/\d[\d,.]*\s*(%|k\b|m\b|bn\b|x\b|\+)?/i) || [num])[0].trim();
+      claims.push({ kind: 'number', value: num, display });
     }
 
     // Events.
@@ -267,7 +269,7 @@ const Grounding = (() => {
         const hit = c.kind === 'name' ? findName(c.value, pool)
           : c.kind === 'number' ? findNumber(c.value, pool)
           : findEvent(c, s.text, pool);
-        return { ...c, found: !!hit.source, source: hit.source ? { owner: hit.source.owner, label: hit.source.label, snippet: snippet(hit.source, hit.term) } : null };
+        return { ...c, found: !!hit.source, source: hit.source ? { owner: hit.source.owner, label: hit.source.label, snippet: snippet(hit.source, hit.term), url: hit.source.url } : null };
       });
       const missing = claims.filter(c => !c.found);
       const status = !claims.length ? 'neutral' : missing.length ? 'unverified' : 'backed';

@@ -10,12 +10,13 @@ const $  = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
-  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed'];
+  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Networking', tone: 'Neutral', format: 'note', mode: 'quick' };
 
 const state = {
   tab: null,
   key: null,
+  activeSentence: null,
   session: null,
   settings: {},
   contacts: [],
@@ -222,6 +223,7 @@ function wireCompose() {
   });
 
   $('message').addEventListener('input', () => {
+    hideEvidence(); // offsets shift while typing; the check re-runs below
     renderMeter();
     autoGrow();
     renderCheckSoon();
@@ -229,6 +231,9 @@ function wireCompose() {
   });
 
   $('message').addEventListener('scroll', () => { $('msg-backdrop').scrollTop = $('message').scrollTop; });
+  $('message').addEventListener('click', showEvidenceAtCaret);
+  $('message').addEventListener('keyup', (e) => { if (/^(Arrow|Home|End|Page)/.test(e.key)) showEvidenceAtCaret(); });
+  $('ev-close').addEventListener('click', hideEvidence);
   $('check-toggle').addEventListener('click', () => toggleCheck());
   $('fix-ai-btn').addEventListener('click', fixWithAI);
   $('nudge-import').addEventListener('click', () => importMe($('nudge-import')));
@@ -367,7 +372,8 @@ function renderProfile(s) {
 }
 
 function renderSteps(s) {
-  const show = s.stage !== 'idle' || s.versions.length;
+  // Steps matter while work is happening; afterwards one summary line is enough.
+  const show = Sessions.isBusy(s) || s.stage === 'error';
   $('stepper').classList.toggle('hidden', !show);
   for (const li of $$('#stepper .step')) {
     const st = s.steps?.[li.dataset.step] || 'idle';
@@ -461,6 +467,7 @@ function renderResult(s) {
 
   const ta = $('message');
   const isNew = state.renderedVersionId && state.renderedVersionId !== v.id && s.active === s.versions.length - 1;
+  if (state.renderedVersionId !== v.id) state.activeSentence = null;
   if (state.renderedVersionId !== v.id || document.activeElement !== ta) {
     if (ta.value !== v.text) ta.value = v.text;
     state.renderedVersionId = v.id;
@@ -1017,7 +1024,7 @@ function renderCheck() {
   badge.dataset.level = level;
   badge.textContent = errors ? '✕' : warns ? '!' : '✓';
   const parts = [];
-  if (factual) parts.push(g.unverified ? `${g.backed}/${factual} claims backed` : `All ${factual} claim${factual > 1 ? 's' : ''} backed`);
+  if (factual) parts.push(g.unverified ? `${g.backed}/${factual} claims backed` : factual === 1 ? '1 claim backed' : `All ${factual} claims backed`);
   else parts.push('No factual claims');
   const issueCount = errors + lint.filter(i => i.level === 'warn' && !i.hidden).length + tips;
   if (issueCount) parts.push(`${issueCount} writing note${issueCount > 1 ? 's' : ''}`);
@@ -1049,7 +1056,7 @@ function renderCheck() {
       if (src) body.appendChild(el('div', 'ci-detail', `${src.label}: ${src.snippet}`));
     }
     li.appendChild(body);
-    li.addEventListener('click', () => selectRange(sen.start, sen.end));
+    li.addEventListener('click', () => { selectRange(sen.start, sen.end); openEvidence(sen); });
     facts.appendChild(li);
   }
   $('facts-section').classList.toggle('hidden', !factual_s.length);
@@ -1077,6 +1084,12 @@ function renderCheck() {
   $('fix-ai-btn').disabled = !fixable || !hasAI() || Sessions.isBusy(state.session);
   $('fix-ai-btn').title = hasAI() ? 'Rewrite with these fixes' : 'Add an Anthropic API key in Settings to fix with AI';
 
+  // Keep an open evidence card pointing at a sentence that still exists.
+  if (state.activeSentence !== null && state.activeSentence !== undefined) {
+    const still = g.sentences.find(x => x.start === state.activeSentence && x.status !== 'neutral');
+    if (still) openEvidence(still); else hideEvidence();
+  }
+  updateEvidenceHint();
   renderBackdrop(c);
 }
 
@@ -1105,7 +1118,8 @@ function renderBackdrop(c) {
         if (i >= 0) inner = inner.slice(0, i) + `<mark class="miss">${term}</mark>` + inner.slice(i + term.length);
       }
     }
-    html += `<span class="hl ${sen.status}">${inner}</span>`;
+    const active = sen.start === state.activeSentence ? ' active' : '';
+    html += `<span class="hl ${sen.status}${active}">${inner}</span>`;
     pos = sen.end;
   }
   html += escapeHtml(text.slice(pos)) + '\n';
@@ -1116,7 +1130,7 @@ function renderBackdrop(c) {
 function autoGrow() {
   const ta = $('message');
   ta.style.height = 'auto';
-  ta.style.height = Math.max(150, ta.scrollHeight + 2) + 'px';
+  ta.style.height = Math.max(96, ta.scrollHeight + 2) + 'px';
 }
 
 function selectRange(start, end) {
@@ -1140,6 +1154,77 @@ async function fixWithAI() {
   });
   if (!r.ok) toast(r.error, { type: 'error' });
   else toast('Rewriting with fixes…');
+}
+
+// ─── Evidence: click a sentence in the message to see where it came from ─────
+function sentenceAt(pos) {
+  if (!lastCheck) return null;
+  return lastCheck.grounding.sentences.find(s => s.status !== 'neutral' && pos >= s.start && pos <= s.end) || null;
+}
+
+function showEvidenceAtCaret() {
+  const sen = sentenceAt($('message').selectionStart);
+  if (!sen) { hideEvidence(); return; }
+  openEvidence(sen);
+}
+
+function openEvidence(sen) {
+  state.activeSentence = sen.start;
+  const box = $('evidence');
+  box.classList.remove('hidden');
+  box.dataset.status = sen.status;
+  $('ev-badge').textContent = sen.status === 'backed' ? '✓' : '!';
+  $('ev-title').textContent = sen.status === 'backed'
+    ? (sen.aboutSender ? 'Backed by your own details' : 'Where this came from')
+    : 'Couldn’t verify this sentence';
+
+  const list = $('ev-list');
+  list.innerHTML = '';
+  // Group the claims by the source that backs them.
+  const groups = new Map();
+  for (const c of sen.claims) {
+    const key = c.found ? `${c.source.label}|${c.source.snippet}` : `missing|${c.value}`;
+    if (!groups.has(key)) groups.set(key, { claim: c, terms: [] });
+    groups.get(key).terms.push(c.display || c.value);
+  }
+  for (const { claim, terms } of [...groups.values()].sort((a, b) => Number(a.claim.found) - Number(b.claim.found))) {
+    const li = el('li', `ev-item ${claim.found ? 'ok' : 'miss'}`);
+    li.appendChild(el('div', 'ev-terms', terms.map(t => `“${t}”`).join(', ')));
+    if (claim.found) {
+      const src = el('div', 'ev-src');
+      src.append(el('b', '', claim.source.label), document.createTextNode(`: ${claim.source.snippet}`));
+      if (claim.source.url) {
+        const a = el('a', 'ev-link', `Open ${hostOf(claim.source.url)} ↗`);
+        a.href = claim.source.url; a.target = '_blank'; a.rel = 'noopener';
+        src.append(' ', a);
+      }
+      li.appendChild(src);
+    } else {
+      const where = sen.aboutSender ? 'your bio or LinkedIn profile' : 'their profile or the research';
+      li.appendChild(el('div', 'ev-src', `Not found in ${where}. Check it before sending, or use Fix with AI.`));
+    }
+    list.appendChild(li);
+  }
+  if (!state.settings.evHintSeen) {
+    state.settings.evHintSeen = true;
+    chrome.storage.local.set({ evHintSeen: true });
+  }
+  $('ev-hint').classList.add('hidden');
+  if (lastCheck) renderBackdrop(lastCheck);
+}
+
+function hideEvidence() {
+  const was = state.activeSentence !== null && state.activeSentence !== undefined;
+  state.activeSentence = null;
+  $('evidence').classList.add('hidden');
+  updateEvidenceHint();
+  if (was && lastCheck) renderBackdrop(lastCheck);
+}
+
+function updateEvidenceHint() {
+  const factual = lastCheck ? lastCheck.grounding.sentences.some(s => s.status !== 'neutral') : false;
+  const open = !$('evidence').classList.contains('hidden');
+  $('ev-hint').classList.toggle('hidden', !factual || open || !!state.settings.evHintSeen);
 }
 
 // ─── Insights: what gets replies ──────────────────────────────────────────────
@@ -1181,6 +1266,9 @@ function renderInsights() {
       `${better ? '↑' : '↓'} Messages ${best.label} got ${pct(best.ra)} replies vs ${pct(best.rb)} ${best.otherLabel} (${best.na} vs ${best.nb} sent).`));
   } else {
     box.appendChild(el('div', 'ins-line muted', 'No clear pattern yet. Keep marking replies.'));
+  }
+  if (sent.length < 20) {
+    box.appendChild(el('div', 'ins-note', `Based on ${sent.length} sent messages, so treat this as a hint. Patterns get reliable with 20+.`));
   }
 }
 

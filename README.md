@@ -1,4 +1,4 @@
-# LinkedIn Outreach AI — v4.2
+# LinkedIn Outreach AI — v4.3
 
 Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest upstream version (v3.1, 19 Nov). It needs no license key and has no company server: messages are written **free on your device**, or by **Claude with your own Anthropic API key**.
 
@@ -6,7 +6,7 @@ Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest 
 
 <p>
   <img src="docs/screenshots/15-check-flagged.png" width="260" alt="Fact check flagging an invented promotion">
-  <img src="docs/screenshots/14-check-ok.png" width="260" alt="Message opening with verified common ground">
+  <img src="docs/screenshots/19-evidence.png" width="260" alt="Click a sentence to see its source">
   <img src="docs/screenshots/17-insights.png" width="260" alt="Tracker insights: what gets replies">
 </p>
 
@@ -41,6 +41,8 @@ The check pulls out *checkable claims*: names (companies, schools, events, title
 - **Not found**: highlighted amber, with the exact words underlined. *"Couldn't find "Director", "Google" or "promotion" in their profile or the research. Check before sending."*
 - **Claims about you** ("I spoke at NeurIPS") are checked against *your* bio and profile only.
 - It re-checks live as you edit.
+
+- **Click any highlighted sentence** to see where it came from: the exact profile field, post, or web article (with a link), or what couldn't be found.
 
 It runs **locally, instantly, with no extra AI call**, so it costs nothing per message. It's a heuristic and labelled as one: it flags things for a human to check; it doesn't judge truth.
 
@@ -153,7 +155,7 @@ linkedin extention/
   - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.
   - The Claude client: headers, 401/429/529/credit errors, refusal, truncation, cost.
   - Research parsing: made-up source URLs are dropped.
-- **`tests/e2e.js`**: 106 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
+- **`tests/e2e.js`**: 117 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
   - onboarding (free, or with a key) and key testing
   - scraping both page layouts
   - LinkedIn swapping pages before the content updates
@@ -168,6 +170,7 @@ linkedin extention/
   - common ground
   - a simulated hallucination caught, then fixed with AI
   - live re-check while editing
+  - clicking a sentence to see its source
   - insights
   - free mode end to end, with zero network calls
 
