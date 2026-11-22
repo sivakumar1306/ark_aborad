@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.3.2: Newer LinkedIn layout
+
+- Fixed: About came back empty on LinkedIn's newer profile layout, where the "… more" button sits inside the paragraph. The section text is now read directly (minus headings, buttons and screen-reader copies) when that's fuller.
+- Fixed: the author's own headline in a post card was saved as a "recent post". Name, headline, timestamps and follower counts are now skipped, and short posts (“Congratulations! 🎉”) are kept.
+- Test pages now cover both layouts; the new checks fail on the previous reader.
+
 ## 4.3.1: Profile reading fix
 
 - Fixed: recent posts and skills came back empty on real LinkedIn profiles. The reader only took `aria-hidden` text when any existed, which skipped post text (nested hashtag links) and text split by `<br>`. It now reads all visible text except screen-reader copies, and reads posts by their longest visible line.

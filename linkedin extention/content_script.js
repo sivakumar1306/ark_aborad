@@ -152,9 +152,12 @@
       }
     }
 
-    // About
-    const aboutTexts = leafTexts(getSection('about')).filter(t => !/^about$/i.test(t));
-    const about = aboutTexts.sort((a, b) => b.length - a.length)[0] || '';
+    // About. Newer layouts put a "… more" button inside the paragraph, so it isn't a
+    // leaf; read the section's text directly too and keep whichever is fuller.
+    const aboutSec = getSection('about');
+    const aboutLeaf = leafTexts(aboutSec).filter(t => !/^about$/i.test(t)).sort((a, b) => b.length - a.length)[0] || '';
+    const aboutText = plainText(aboutSec).replace(/^about\s+/i, '');
+    const about = aboutText.length > aboutLeaf.length + 10 ? aboutText : aboutLeaf;
 
     // Experience
     const experienceEntries = parseExperience(getSection('experience'));
@@ -187,11 +190,12 @@
     if (act) {
       // Post text has nested links/hashtags, so read whole visible lines rather than leaves.
       const items = topItems(act);
+      const own = { name, headline };
       const sources = items.length
-        ? items.map(li => postTextOf(li))
-        : visibleLines(act).filter(t => t.length > 40);
+        ? items.map(li => postTextOf(li, own))
+        : visibleLines(act).filter(t => t.length > 40 && !isOwnLine(t, own));
       for (const t of sources) {
-        if (t && t.length > 40 && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
+        if (t && t.length >= 12 && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
           recentPosts.push(t.slice(0, 500));
         }
       }
@@ -221,11 +225,39 @@
       .filter(t => t.length > 1 && !JUNK_RE.test(t));
   }
 
-  function postTextOf(item) {
+  // Text of an element without headings, buttons ("… more") and screen-reader copies,
+  // with words kept apart (textContent would glue block elements together).
+  function plainText(el) {
+    if (!el) return '';
+    const c = el.cloneNode(true);
+    c.querySelectorAll('h2, .visually-hidden, .sr-only, button, [role="button"], svg').forEach(n => n.remove());
+    c.querySelectorAll('br').forEach(b => b.replaceWith(' '));
+    const parts = [];
+    const w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) parts.push(w.currentNode.nodeValue);
+    return clean(parts.join(' ')).replace(/\s*(…|\.\.\.)\s*(see )?more$/i, '…');
+  }
+
+  // Lines in a post card that belong to the author block, not the post: their name,
+  // their headline (possibly truncated with "…"), timestamps, follower counts.
+  function isOwnLine(t, { name, headline }) {
+    const n = t.replace(/…$/, '').trim().toLowerCase();
+    if (!n) return true;
+    if (name && n === name.toLowerCase()) return true;
+    if (headline) {
+      const h = headline.toLowerCase();
+      if (n === h || h.startsWith(n) || (n.length > 25 && n.startsWith(h.slice(0, 25)))) return true;
+    }
+    return /^\d+\s?(m|h|d|w|mo|yr|yrs)\b|•\s*(edited)?$|followers?$|^follow$|^\d+(st|nd|rd|th)\+?$/i.test(t);
+  }
+
+  function postTextOf(item, own = {}) {
+    const junk = /hasn.t posted|reposted this|commented on|liked this|followers?$|^\d+ (comments?|reposts?|reactions?)/i;
+    // The post's own text container, when LinkedIn marks it, wins even if short ("Congratulations! 🎉").
     const preferred = Array.from(item.querySelectorAll('.update-components-text, .feed-shared-inline-show-more-text, [dir="ltr"]'))
-      .map(e => clean(e.innerText || e.textContent));
-    const lines = [...preferred, ...visibleLines(item)]
-      .filter(t => t.length > 40 && !/hasn.t posted|reposted this|commented on|liked this|followers?$|^\d+ (comments?|reposts?|reactions?)/i.test(t));
+      .map(e => clean(e.innerText || e.textContent)).filter(t => t.length >= 12 && !junk.test(t) && !isOwnLine(t, own));
+    if (preferred.length) return preferred.sort((a, b) => b.length - a.length)[0];
+    const lines = visibleLines(item).filter(t => t.length >= 12 && !junk.test(t) && !isOwnLine(t, own));
     return lines.sort((a, b) => b.length - a.length)[0] || '';
   }
 

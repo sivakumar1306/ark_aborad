@@ -326,6 +326,8 @@ async function main() {
   check('fallback parser: title/company', s2.profile.experienceEntries[0]?.title === 'Product Designer' && s2.profile.currentCompany === 'Northwind', s2.profile.experienceEntries);
   check('fallback parser: second role not polluted by location', s2.profile.experienceEntries[1]?.title === 'UX Designer' && s2.profile.experienceEntries[1]?.company === 'Shopify', s2.profile.experienceEntries);
   check('headline + location', s2.profile.headline.includes('Product Designer @ Northwind') && s2.profile.location === 'Toronto, Ontario, Canada', [s2.profile.headline, s2.profile.location]);
+  check('newer layout: About with a "… more" button is read', s2.profile.about.includes('Designer who codes') && s2.profile.about.includes('motion design') && !/more$/.test(s2.profile.about), s2.profile.about);
+  check('newer layout: post read, author headline skipped', s2.profile.recentPosts.length === 1 && s2.profile.recentPosts[0].startsWith('Shipped dark mode'), s2.profile.recentPosts);
   check('InMail shows subject + body meter', (await panel3.inputValue('#message')).startsWith('Subject:') && (await panel3.textContent('#meter-text')).includes('/ 1900'));
 
   // ── 9b. Real LinkedIn markup: posts with nested links, <br> About, skills ─
@@ -336,7 +338,9 @@ async function main() {
   await panel3.click('#refresh-profile');
   await panel3.waitForFunction(() => /post/.test(document.getElementById('p-quality').textContent) && !/load on Generate/.test(document.getElementById('p-quality').textContent), null, { timeout: 10000 });
   const rv = (await sw.evaluate(() => Sessions.get('rahul-real-test'))).profile;
-  check('posts with nested hashtag links are read', rv.recentPosts.length === 2 && rv.recentPosts[0].includes('open-sourced RoboNav') && rv.recentPosts[0].includes('#robotics'), rv.recentPosts);
+  check('posts with nested hashtag links are read', rv.recentPosts.length === 3 && rv.recentPosts[0].includes('open-sourced RoboNav') && rv.recentPosts[0].includes('#robotics'), rv.recentPosts);
+  check('author headline in a post card is not mistaken for the post', !rv.recentPosts.some(t => t.includes('AWS Certified')), rv.recentPosts);
+  check('short posts are kept', rv.recentPosts[2] === 'Congratulations! 🎉', rv.recentPosts);
   check('follower counts / actor lines are not mistaken for posts', !rv.recentPosts.some(t => /followers|2w •|comments/.test(t)));
   check('skills read from nested markup', rv.skills.join('|') === 'Robot Operating System (ROS)|Python (Programming Language)', rv.skills);
   check('About text split by <br> is read whole', rv.about.includes('warehouse robots') && rv.about.includes('ROS2 and SLAM'), rv.about);
