@@ -11,7 +11,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
-const DEFAULT_PREFS = { purpose: 'Networking', tone: 'Neutral', format: 'note', mode: 'quick' };
+const DEFAULT_PREFS = { purpose: 'Auto', tone: 'Neutral', format: 'note', mode: 'quick' };
 
 const state = {
   tab: null,
@@ -248,7 +248,41 @@ function wireCompose() {
 
 function currentOptions(extra = {}) {
   const p = prefs();
-  return { purpose: p.purpose, tone: p.tone, format: p.format, mode: p.mode, commonGround: selectedCommon().map(c => c.text), ...extra };
+  return { purpose: resolvedPurpose(), tone: p.tone, format: p.format, mode: p.mode, commonGround: selectedCommon().map(c => c.text), ...extra };
+}
+
+// ─── Who is the recipient? ────────────────────────────────────────────────────
+function recipientNow() {
+  return state.session ? Recipient.classify(Sessions.effectiveProfile(state.session) || {}) : null;
+}
+
+function resolvedPurpose() {
+  const p = prefs().purpose;
+  return p === 'Auto' ? Recipient.suggestPurpose(recipientNow()) : p;
+}
+
+const PURPOSE_NAMES = { Networking: 'Networking', Advice: 'Career advice', Job: 'Job opportunity', Referral: 'Referral request', Collaboration: 'Collaboration' };
+
+function renderRecipient(s) {
+  const r = Sessions.effectiveProfile(s) ? recipientNow() : null;
+  const self = isSelf();
+  $('recipient').classList.toggle('hidden', !r || self);
+  if (r && !self) {
+    $('rc-chip').textContent = `${r.icon} ${r.label}`;
+    $('rc-chip').dataset.type = r.type;
+    $('rc-why').textContent = r.why ? `from ${r.why}` : '';
+  }
+  const p = prefs().purpose;
+  const first = (Sessions.effectiveProfile(s)?.name || '').split(' ')[0];
+  $('purpose-hint').textContent = p === 'Auto' && r ? `Auto picks ${PURPOSE_NAMES[r.purpose]} for ${r.article}.` : '';
+  $('purpose-hint').classList.toggle('hidden', !(p === 'Auto' && r));
+  const warn = self ? null : Recipient.mismatch(r, p, first);
+  $('purpose-warn').classList.toggle('hidden', !warn);
+  if (warn) {
+    $('purpose-warn-text').textContent = warn.reason;
+    $('purpose-warn-btn').textContent = `Switch to ${PURPOSE_NAMES[warn.suggest]}`;
+    $('purpose-warn-btn').onclick = () => savePrefs({ purpose: warn.suggest });
+  }
 }
 
 async function onPrimary({ another = false, shorten = false } = {}) {
@@ -316,6 +350,7 @@ function renderCompose() {
 
   const s = state.session || Sessions.blank(state.key);
   renderProfile(s);
+  renderRecipient(s);
   renderGround(s);
   renderSteps(s);
   renderHooks(s);

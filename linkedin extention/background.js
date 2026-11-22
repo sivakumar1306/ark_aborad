@@ -11,7 +11,7 @@
 // There is no company server and no license key.
 
 importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js',
-  'utils/localwriter.js', 'utils/prompts.js');
+  'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
 const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
@@ -189,6 +189,9 @@ async function write(key, options = {}, settings) {
   const profile  = Sessions.effectiveProfile(s);
   const useAI    = !!settings.userApiKey && !options.forceLocal;
   const model    = settings.writerModel || 'claude-haiku-5-5';
+  const recipient = Recipient.classify(profile);
+  // "Auto" (or anything unknown) resolves to what fits this person.
+  const purpose  = !options.purpose || options.purpose === 'Auto' ? Recipient.suggestPurpose(recipient) : options.purpose;
 
   let text, cost = 0, engine;
   if (useAI) {
@@ -200,13 +203,15 @@ async function write(key, options = {}, settings) {
       noteLimit,
       hooks:     useDeep ? hooks.length : undefined,
       commonGround: options.commonGround,
-      revise:    options.revise
+      revise:    options.revise,
+      recipient
     });
     const body = Prompts.writerBody({
       model, profile, hooks,
       common: options.commonGround,
+      recipientType: recipient?.type,
       sender: { name: settings.userName, bio: settings.userBio, profile: settings.myProfile },
-      purpose: options.purpose || 'Networking',
+      purpose,
       tone: options.tone || 'Neutral',
       requirements,
       resumeBase64: settings.resumeBase64 || null
@@ -222,11 +227,12 @@ async function write(key, options = {}, settings) {
       sender: { name: settings.userName, bio: settings.userBio },
       common: options.commonGround,
       hooks,
-      purpose: options.purpose || 'Networking',
+      purpose,
       tone: options.tone || 'Neutral',
       format: f.id,
       noteLimit,
       variant: s.versions.length,
+      recipientType: recipient?.type,
       shorten: options.shorten
     });
     engine = 'local';
@@ -239,7 +245,7 @@ async function write(key, options = {}, settings) {
     x.versions.push({
       id: Date.now().toString(36),
       text, format: f.id,
-      purpose: options.purpose || 'Networking', tone: options.tone || 'Neutral',
+      purpose, tone: options.tone || 'Neutral',
       mode: useDeep ? 'deep' : 'quick',
       hooks: hooks.map(h => h.text),
       commonGround: options.commonGround || [],
@@ -271,6 +277,8 @@ async function write(key, options = {}, settings) {
       mode:   useDeep ? 'deep' : 'quick',
       format: f.id,
       tone:   options.tone || 'Neutral',
+      purpose,
+      recipient: recipient?.type || null,
       hooks:  hooks.length,
       common: (options.commonGround || []).length,
       engine

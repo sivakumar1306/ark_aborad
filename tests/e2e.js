@@ -526,11 +526,28 @@ async function main() {
   check('another version is actually different', (await panel3.inputValue('#message')) !== free1);
   await shot('18-free-mode', panel3);
 
+  console.log('\nRecipient-aware purpose');
+  check('recipient chip shows who they are', (await panel3.textContent('#rc-chip')).includes('Senior engineer') && (await panel3.textContent('#rc-why')).includes('Senior ML Engineer'));
+  await panel3.selectOption('#opt-purpose', 'Auto');
+  check('Auto explains its pick', (await panel3.textContent('#purpose-hint')).includes('Career advice'));
+  await panel3.selectOption('#opt-purpose', 'Job');
+  await panel3.waitForSelector('#purpose-warn:not(.hidden)');
+  check('warns when the purpose does not fit', (await panel3.textContent('#purpose-warn-text')).includes('probably doesn’t hire directly'));
+  await panel3.click('#purpose-warn-btn');
+  check('one click switches to the suggested purpose', (await panel3.inputValue('#opt-purpose')) === 'Advice' && await panel3.isHidden('#purpose-warn'));
+  vb = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  check('the ask matches (career advice)', /question about your path|advice/i.test(await panel3.inputValue('#message')), await panel3.inputValue('#message'));
+  await shot('20-recipient', panel3);
+
   await panel3.click('#opt-mode [data-value="deep"]');
   check('deep hint explains free research', (await panel3.textContent('#mode-hint')).includes('from their profile'));
-  vb = await panel3.textContent('#v-label');
+  // Versions are capped at 12 per person, so wait for a new version id rather than the counter.
+  const lastId = async () => (await sw.evaluate(() => Sessions.get('priya-sharma-test'))).versions.slice(-1)[0]?.id;
+  const idBefore = await lastId();
   await panel3.click('#primary-btn');
-  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  for (let i = 0; i < 50 && (await lastId()) === idBefore; i++) await sleep(200);
   const freeHooks = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
   check('free deep mode: profile hooks, no web calls', freeHooks.some(t => t.startsWith('Recently posted')) && (await getLog()).length === callsBefore, freeHooks);
   await panel3.click('#opt-mode [data-value="quick"]');

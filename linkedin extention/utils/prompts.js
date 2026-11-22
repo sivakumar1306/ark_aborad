@@ -55,7 +55,8 @@ const Prompts = (() => {
         bio: ctx.sender?.bio || undefined,
         profile: ctx.sender?.profile ? compactProfile(ctx.sender.profile) : undefined
       },
-      purpose: ctx.purpose,
+      purpose: ctx.purpose === 'Advice' ? 'Career advice' : ctx.purpose,
+      recipient_type: ctx.recipientType || undefined,
       tone: ctx.tone
     };
     const content = [];

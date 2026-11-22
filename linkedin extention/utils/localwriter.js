@@ -46,7 +46,7 @@ const LocalWriter = (() => {
     return null;
   }
 
-  function openers({ profile: p, common = [], hooks: picked = [] }) {
+  function openers({ profile: p, common = [], hooks: picked = [], recipientType = null }) {
     const f = first(p.name);
     const list = [];
     for (const c of common) {
@@ -67,10 +67,19 @@ const LocalWriter = (() => {
       if (h.kind === 'past' && h.company) list.push({ kind: 'past', short: `your path from ${h.company} to ${p.currentCompany || 'your current role'} caught my eye.`, long: `Your path from ${h.company} to ${p.currentCompany || 'your current role'} caught my eye.`, subject: `Your path from ${h.company}` });
       if (h.kind === 'school' && h.school) list.push({ kind: 'school', short: `I saw you studied at ${h.school}.`, long: `I saw you studied at ${h.school}.`, subject: `Question from a fellow student` });
     }
-    if (p.currentTitle && p.currentCompany) {
-      list.push({ kind: 'role', short: `your work as ${p.currentTitle} at ${p.currentCompany} is close to what I want to do.`, long: `Your work as ${p.currentTitle} at ${p.currentCompany} is close to what I want to do next.`, subject: `Quick question about ${p.currentCompany}` });
+    const type = recipientType;
+    if (type === 'student' && (p.currentTitle || p.headline)) {
+      // "Computer Science Student" → "Computer Science"; the school is usually the "company".
+      const field = String(p.currentTitle || p.headline).split(/\s*[|·@]\s*|\s+at\s+/i)[0].replace(/\b(student|undergrad\w*|aspiring)\b/ig, '').replace(/\s+/g, ' ').trim();
+      const where = p.currentCompany ? ` at ${p.currentCompany}` : '';
+      const what = field ? `studying ${field}${where}` : `a student${where}`;
+      list.push({ kind: 'role', short: `I saw you’re ${what}.`, long: `I saw you’re ${what}.`, subject: `Hello from a fellow student` });
+    } else if (type === 'recruiter' && p.currentCompany) {
+      list.push({ kind: 'role', short: `I saw you recruit for ${p.currentCompany}.`, long: `I saw you recruit for ${p.currentCompany}.`, subject: `Interested in roles at ${p.currentCompany}` });
+    } else if (p.currentTitle && p.currentCompany) {
+      list.push({ kind: 'role', short: `your work as ${p.currentTitle} at ${p.currentCompany} caught my eye.`, long: `Your work as ${p.currentTitle} at ${p.currentCompany} caught my eye.`, subject: `Quick question about ${p.currentCompany}` });
     } else if (p.headline) {
-      list.push({ kind: 'headline', short: `your focus on ${lower(topic(p.headline, 50))} is close to what I want to do.`, long: `Your focus on ${lower(topic(p.headline, 70))} is close to what I want to do next.`, subject: 'Quick question' });
+      list.push({ kind: 'headline', short: `your focus on ${lower(topic(p.headline, 50))} caught my eye.`, long: `Your focus on ${lower(topic(p.headline, 70))} caught my eye.`, subject: 'Quick question' });
     }
     return list;
   }
@@ -91,7 +100,15 @@ const LocalWriter = (() => {
     Networking:    { short: 'Would love to connect!', long: 'Would you be open to connecting? I’d love to hear how you got to where you are.' },
     Job:           { short: 'Open to a quick chat about roles on your team?', long: 'Would you be open to a quick chat about roles on your team? Even 15 minutes would help a lot.' },
     Referral:      { short: 'Open to a quick chat about roles at {company}?', long: 'Would you be open to a quick chat about roles at {company}? If it feels like a fit afterwards, I’d be grateful for a referral.' },
-    Collaboration: { short: 'Open to exploring a collaboration?', long: 'Would you be open to a short call to explore working together?' }
+    Collaboration: { short: 'Open to exploring a collaboration?', long: 'Would you be open to a short call to explore working together?' },
+    Advice:        { short: 'Could I ask you one quick question about your path?', long: 'Would you be open to sharing one piece of advice for someone starting out in your field? Even a couple of lines would help a lot.' }
+  };
+
+  // The same purpose needs a different ask depending on who they are.
+  const ASK_BY_TYPE = {
+    student:   { Networking: { short: 'Would love to connect and swap notes!', long: 'Would love to connect and swap notes on what we’re each working on.' } },
+    recruiter: { Job: { short: 'Open to a quick chat about openings at {company}?', long: 'Would you be open to a quick chat about openings at {company} that might fit my background?' } },
+    leader:    { Job: { short: 'Is your team hiring? I’d love to hear what you look for.', long: 'Is your team hiring at the moment? I’d love to hear what you look for in new people.' } }
   };
 
   const GREET = { Formal: (f) => `Dear ${f},`, Neutral: (f) => `Hi ${f},`, Casual: (f) => `Hey ${f}!` };
@@ -105,9 +122,9 @@ const LocalWriter = (() => {
     const f = first(p.name);
     const fmt = Formats.get(ctx.format, { noteLimit: ctx.noteLimit || 300 });
     const tone = GREET[ctx.tone] ? ctx.tone : 'Neutral';
-    const ask = (ASKS[ctx.purpose] || ASKS.Networking);
+    const ask = ASK_BY_TYPE[ctx.recipientType]?.[ctx.purpose] || ASKS[ctx.purpose] || ASKS.Networking;
     const fill = (s) => s.replace('{company}', p.currentCompany || 'your company');
-    const ops = openers({ profile: p, common: ctx.common || [], hooks: ctx.hooks || [] });
+    const ops = openers({ profile: p, common: ctx.common || [], hooks: ctx.hooks || [], recipientType: ctx.recipientType });
     const op = ops.length ? ops[(ctx.variant || 0) % ops.length] : { short: 'I’d love to learn more about your work.', long: 'I’d love to learn more about your work.', subject: 'Quick question' };
     const second = ops.length > 1 ? ops[((ctx.variant || 0) + 1) % ops.length] : null;
 

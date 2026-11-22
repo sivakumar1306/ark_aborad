@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.4.0: Recipient-aware messages
+
+- The extension now works out who the recipient is from their title and headline: student, recruiter, team lead or manager, founder, senior engineer, or other professional. It's shown as a chip with the reason.
+- New default purpose **Auto** picks what fits: student → Networking, recruiter → Job, team lead → Job, senior engineer → Career advice. New **Career advice** purpose.
+- Picking a purpose that doesn't fit (e.g. Job to a student) shows a warning with one-click switch; the user stays in control.
+- Free writer: openers and asks adapt to the recipient (“I saw you’re studying Computer Science at VIT… swap notes”, “openings at Google?”, “Is your team hiring?”). No more “roles on your team” to a student, or “close to what I want to do next”.
+- AI mode: the prompt says who the recipient appears to be and what they can realistically help with.
+
 ## 4.3.3
 
 - Posts with nothing to build on (“Congratulations! 🎉”, “Happy birthday!”, under 6 real words) are no longer used as recent posts or hooks.
