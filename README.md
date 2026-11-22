@@ -1,4 +1,4 @@
-# LinkedIn Outreach AI — v4.3
+# LinkedIn Outreach AI — v4.4
 
 Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest upstream version (v3.1, 19 Nov). It needs no license key and has no company server: messages are written **free on your device**, or by **Claude with your own Anthropic API key**.
 
@@ -26,6 +26,13 @@ Upstream's free template always opened with *"I came across your profile and was
 - rotates openers, so "Write another version" gives a real alternative
 
 In AI mode, if Claude can't be used (a bad key, no credit, an outage), the error comes with a **"Write in free mode"** button, so the user is never stuck.
+
+## Messages that fit who they're for
+
+A message can be well written and still wrong for the person. Asking a student about "roles on your team" is the classic case. `utils/recipient.js` classifies the recipient from their title and headline (student, recruiter, team lead or manager, founder, senior engineer, professional) and shows it as a chip with the reason.
+- The default purpose, **Auto**, picks what that person can realistically help with.
+- If you pick something that doesn't fit, you get a one-click suggestion instead of a silent override.
+- Both writers adapt the opener and the ask; in AI mode the prompt says who the recipient is.
 
 ## The trust layer
 
@@ -149,13 +156,13 @@ linkedin extention/
 
 ## Tests
 
-- **`tests/unit.js`**: 59 checks.
+- **`tests/unit.js`**: 83 checks.
   - Fact check: true messages raise no false alarms; invented claims, sender claims and acronyms are handled.
   - Lint rules.
   - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.
   - The Claude client: headers, 401/429/529/credit errors, refusal, truncation, cost.
   - Research parsing: made-up source URLs are dropped.
-- **`tests/e2e.js`**: 127 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
+- **`tests/e2e.js`**: 140 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
   - onboarding (free, or with a key) and key testing
   - scraping both page layouts
   - LinkedIn swapping pages before the content updates

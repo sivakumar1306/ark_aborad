@@ -29,7 +29,7 @@ const Formats = (() => {
 
   function list() { return Object.values(DEFS); }
 
-  function brief({ format, context, shorten, previous, noteLimit, hooks, commonGround, revise }) {
+  function brief({ format, context, shorten, previous, noteLimit, hooks, commonGround, revise, recipient }) {
     const f = get(format, { noteLimit });
     const lines = [`Output format: ${f.name}.`];
     if (f.id === 'note') {
@@ -40,6 +40,9 @@ const Formats = (() => {
       lines.push(`Keep it under ${f.target} characters. No subject line, no placeholders.`);
     }
     if (hooks === 0) lines.push('Do not reference company news or recent events.');
+    if (recipient) {
+      lines.push(`The recipient appears to be ${recipient.article}${recipient.why ? ` (${recipient.why})` : ''}. ${recipient.guidance} Make the ask something they can realistically help with.`);
+    }
     if (commonGround && commonGround.length) {
       lines.push(`Genuine shared background between sender and recipient (verified from both profiles). Open with the strongest one, naturally: ${commonGround.join('; ')}.`);
     }

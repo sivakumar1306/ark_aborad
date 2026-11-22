@@ -88,6 +88,7 @@ const Grounding = (() => {
     add('them', 'Their headline', p.headline);
     add('them', 'Their current role', [p.currentTitle, p.currentCompany].filter(Boolean).join(' at '));
     add('them', 'Their location', p.location);
+    (p.currentRoles || []).forEach(r => add('them', 'Their current role', [r.title, r.company && `at ${r.company}`].filter(Boolean).join(' ')));
     add('them', 'Their About section', p.about);
     (p.recentPosts || []).forEach(t => add('them', 'Their recent post', t));
     (p.experienceEntries || []).forEach(e => add('them', 'Their experience', [e.title, e.company && `at ${e.company}`, e.duration, e.description].filter(Boolean).join(' ')));

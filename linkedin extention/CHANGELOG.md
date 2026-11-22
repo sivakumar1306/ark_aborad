@@ -1,5 +1,27 @@
 # Changelog
 
+## 4.4.2: Names with titles
+
+- Fixed: “Dear Dr.,”. Titles (Dr., Prof., Mr./Ms., Er., Shri/Smt., …), credentials (PhD, MBA…), pronouns and emoji are stripped from names (`utils/names.js`). Formal tone addresses doctors and professors as “Dear Dr. Pravin,”; other tones use the first name (“Hi Sheena,”).
+- The writing check accepts both forms and still flags a wrong name.
+- AI mode is told how to address the person (`address_them_as`).
+- The headline-only opener no longer lowercases titles (“assistant Director”).
+
+## 4.4.1: Multi-role profiles and inner-panel scrolling
+
+- Current company is read from LinkedIn's profile header ("Current company: …"), so it's no longer empty for headlines like "Associate Professor, VIT and CEO, MEDxAI Pvt. Ltd.".
+- Several current roles are kept (`currentRoles`), from "Present" jobs in Experience, or split out of the headline. The primary title is the one at the header's company. Ongoing jobs no longer count as "past companies".
+- Lazy sections (Experience, About, Skills) now load on layouts that scroll an inner panel instead of the window: the reader brings sections into view and restores the panel's position.
+- All current roles reach the fact check, the AI prompt and the recipient classifier.
+
+## 4.4.0: Recipient-aware messages
+
+- The extension now works out who the recipient is from their title and headline: student, recruiter, team lead or manager, founder, senior engineer, or other professional. It's shown as a chip with the reason.
+- New default purpose **Auto** picks what fits: student → Networking, recruiter → Job, team lead → Job, senior engineer → Career advice. New **Career advice** purpose.
+- Picking a purpose that doesn't fit (e.g. Job to a student) shows a warning with one-click switch; the user stays in control.
+- Free writer: openers and asks adapt to the recipient (“I saw you’re studying Computer Science at VIT… swap notes”, “openings at Google?”, “Is your team hiring?”). No more “roles on your team” to a student, or “close to what I want to do next”.
+- AI mode: the prompt says who the recipient appears to be and what they can realistically help with.
+
 ## 4.3.3
 
 - Posts with nothing to build on (“Congratulations! 🎉”, “Happy birthday!”, under 6 real words) are no longer used as recent posts or hooks.

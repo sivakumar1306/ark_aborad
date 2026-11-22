@@ -6,10 +6,12 @@ const path = require('path');
 const ext = (f) => path.join(__dirname, '..', 'linkedin extention', 'utils', f);
 const Grounding = require(ext('grounding.js'));
 const CommonGround = require(ext('common.js'));
+global.Names = require(ext('names.js'));
 const Lint = require(ext('lint.js'));
 global.Formats = require(ext('formats.js'));
 const LocalWriter = require(ext('localwriter.js'));
 global.Claude = require(ext('api.js'));
+const Recipient = require(ext('recipient.js'));
 const Prompts = require(ext('prompts.js'));
 
 let passed = 0, failed = 0;
@@ -137,6 +139,48 @@ console.log('\nFree-mode writer');
   check('profile hooks for free Deep mode', hooks.length >= 4 && hooks[0].kind === 'post', hooks.map(h => h.kind));
   const bare = LocalWriter.write({ profile: { name: 'Jo Lee' }, sender: {}, purpose: 'Networking', tone: 'Neutral', format: 'note' });
   check('sparse profile still yields a clean note', /^Hi Jo,/.test(bare) && bare.length < 200, bare);
+}
+
+console.log('\nRecipient type');
+{
+  const t = (title, headline = title) => Recipient.classify({ currentTitle: title, headline })?.type;
+  check('student (the screenshot case)', t('Computer Science Student', 'Computer Science Student at VIT | Python | Aspiring Software Developer') === 'student');
+  check('recruiter', t('Technical Recruiter') === 'recruiter' && t('Talent Acquisition Partner') === 'recruiter' && t('Head of Talent Acquisition') === 'recruiter');
+  check('team lead / manager', t('Engineering Manager') === 'leader' && t('Head of Data') === 'leader' && t('Tech Lead') === 'leader');
+  check('founder', t('Co-founder & CEO') === 'founder');
+  check('senior engineer', t('Senior ML Engineer') === 'senior' && t('Staff Software Engineer') === 'senior');
+  check('intern counts as early-career', t('Software Engineering Intern') === 'student');
+  check('other professionals', t('Product Designer') === 'professional');
+  check('title beats headline', Recipient.classify({ currentTitle: 'Technical Recruiter', headline: 'Ex-student ambassador' }).type === 'recruiter');
+  const stu = Recipient.classify({ currentTitle: 'Computer Science Student', currentCompany: 'VIT' });
+  check('Auto: student → Networking, recruiter → Job, senior → Advice', Recipient.suggestPurpose(stu) === 'Networking' && Recipient.suggestPurpose(Recipient.classify({ currentTitle: 'Technical Recruiter' })) === 'Job' && Recipient.suggestPurpose(Recipient.classify({ currentTitle: 'Senior Engineer' })) === 'Advice');
+  check('warns: Job to a student', Recipient.mismatch(stu, 'Job', 'Anirudh')?.suggest === 'Networking');
+  check('no warning when it fits', !Recipient.mismatch(stu, 'Networking') && !Recipient.mismatch(Recipient.classify({ currentTitle: 'Technical Recruiter' }), 'Job'));
+  const anirudh = { name: 'Anirudh Sistu', headline: 'Computer Science Student at VIT | Python', currentTitle: 'Computer Science Student', currentCompany: 'VIT' };
+  const msg = LocalWriter.write({ profile: anirudh, sender: { name: 'Sam Rivera' }, purpose: 'Networking', tone: 'Neutral', format: 'dm', recipientType: 'student' });
+  check('free writer: no "roles on your team" to a student', !/roles on your team|your work as Computer Science Student/i.test(msg) && /studying Computer Science at VIT/.test(msg), msg);
+  const rec = LocalWriter.write({ profile: { name: 'Neha Rao', currentTitle: 'Technical Recruiter', currentCompany: 'Google' }, sender: {}, purpose: 'Job', tone: 'Neutral', format: 'note', noteLimit: 200, recipientType: 'recruiter' });
+  check('free writer: recruiter gets an openings ask', /openings at Google/.test(rec), rec);
+  const req = Formats.brief({ format: 'note', recipient: stu });
+  check('AI brief carries what they can help with', /appears to be a student/.test(req) && /cannot hire or refer/.test(req), req);
+}
+
+console.log('\nNames');
+{
+  const N = Names;
+  check('title stripped: Dr. Sheena Christabel Pravin → Sheena', N.first('Dr. Sheena Christabel Pravin') === 'Sheena');
+  check('formal greeting keeps the title: Dr. Pravin', N.greeting('Dr. Sheena Christabel Pravin', 'Formal') === 'Dr. Pravin' && N.greeting('Dr. Sheena Christabel Pravin', 'Neutral') === 'Sheena');
+  check('Prof. formal', N.greeting('Prof. Anil Kumar', 'Formal') === 'Prof. Kumar');
+  check('credentials and pronouns stripped', N.first('Rahul Verma, PhD') === 'Rahul' && N.first('Er. Anil Kumar (He/Him)') === 'Anil' && N.first('Meera Joshi 🚀') === 'Meera');
+  check('plain names unchanged', N.first('Priya Sharma') === 'Priya' && N.greeting('Priya Sharma', 'Formal') === 'Priya');
+  check('initials skip the title', N.initials('Dr. Sheena Christabel Pravin') === 'SP');
+  const sheena = { name: 'Dr. Sheena Christabel Pravin', currentTitle: 'CEO', currentCompany: 'MEDxAI INNOVATIONS Pvt. Ltd.' };
+  const formal = LocalWriter.write({ profile: sheena, sender: {}, purpose: 'Networking', tone: 'Formal', format: 'dm', recipientType: 'founder' });
+  const neutral = LocalWriter.write({ profile: sheena, sender: {}, purpose: 'Networking', tone: 'Neutral', format: 'note', noteLimit: 200, recipientType: 'founder' });
+  check('free writer: "Dear Dr. Pravin," not "Dear Dr.,"', formal.startsWith('Dear Dr. Pravin,'), formal.split('\n')[0]);
+  check('free writer: "Hi Sheena," in neutral tone', neutral.startsWith('Hi Sheena,'), neutral);
+  check('lint accepts both greetings', !Lint.check(formal, { format: 'dm', recipientName: sheena.name }).some(i => i.id === 'wrong-name') && !Lint.check(neutral, { format: 'note', recipientName: sheena.name }).some(i => i.id === 'wrong-name'));
+  check('lint still catches a wrong name', Lint.check('Dear Dr. Sharma, hi?', { format: 'dm', recipientName: sheena.name }).some(i => i.id === 'wrong-name'));
 }
 
 console.log('\nClaude client');

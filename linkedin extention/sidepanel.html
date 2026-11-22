@@ -88,16 +88,28 @@
             </span>
           </div>
 
+          <div class="recipient hidden" id="recipient">
+            <span class="rc-chip" id="rc-chip"></span>
+            <span class="rc-why" id="rc-why"></span>
+          </div>
+
           <div class="options">
             <label class="field">
               <span class="field-label">Purpose</span>
               <select id="opt-purpose" class="input select">
+                <option value="Auto">Auto: fits who they are</option>
                 <option value="Networking">Networking</option>
+                <option value="Advice">Career advice</option>
                 <option value="Job">Job opportunity</option>
                 <option value="Referral">Referral request</option>
                 <option value="Collaboration">Collaboration</option>
               </select>
             </label>
+            <div class="hint purpose-hint" id="purpose-hint"></div>
+            <div class="banner banner-warn purpose-warn hidden" id="purpose-warn" role="status">
+              <span id="purpose-warn-text"></span>
+              <button class="link" type="button" id="purpose-warn-btn"></button>
+            </div>
 
             <div class="field">
               <span class="field-label" id="lbl-format">Send as</span>
@@ -432,12 +444,14 @@
     <div class="toast" id="toast" role="status" aria-live="polite"><span id="toast-text"></span><button class="link" type="button" id="toast-action"></button></div>
   </div>
 
+  <script src="utils/names.js"></script>
   <script src="utils/session.js"></script>
   <script src="utils/formats.js"></script>
   <script src="utils/contacts.js"></script>
   <script src="utils/grounding.js"></script>
   <script src="utils/common.js"></script>
   <script src="utils/lint.js"></script>
+  <script src="utils/recipient.js"></script>
   <script src="utils/api.js"></script>
   <script src="sidepanel.js"></script>
 </body>

@@ -75,7 +75,7 @@ async function main() {
   await ctx.route('https://www.linkedin.com/**', route => {
     const url = route.request().url();
     if (/\/in\/me\/?$/.test(url)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<script>location.replace("/in/sam-rivera-test/")</script>' });
-    const file = /\/in\/rahul/.test(url) ? 'profile-real.html' : /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
+    const file = /\/in\/sheena/.test(url) ? 'profile-multi.html' : /\/in\/rahul/.test(url) ? 'profile-real.html' : /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
     if (!file) return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>Feed</h1></body></html>' });
     route.fulfill({ status: 200, contentType: 'text/html', body: fs.readFileSync(path.join(__dirname, 'fixtures', file), 'utf8') });
   });
@@ -345,6 +345,23 @@ async function main() {
   check('skills read from nested markup', rv.skills.join('|') === 'Robot Operating System (ROS)|Python (Programming Language)', rv.skills);
   check('About text split by <br> is read whole', rv.about.includes('warehouse robots') && rv.about.includes('ROS2 and SLAM'), rv.about);
   check('review fields show posts and skills', (await panel3.inputValue('[data-edit="recentPosts"]')).includes('RoboNav') && (await panel3.inputValue('[data-edit="skills"]')).includes('Python'));
+
+  console.log('\nSeveral current roles + inner scroll panel');
+  await li.goto('https://www.linkedin.com/in/sheena-multi-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Dr. Sheena Christabel Pravin', null, { timeout: 8000 });
+  const sh0 = (await sw.evaluate(() => Sessions.get('sheena-multi-test'))).profile;
+  check('company from the profile header, not empty', sh0.currentCompany === 'MEDxAI INNOVATIONS Pvt. Ltd.', sh0.currentCompany);
+  check('roles split out of a multi-role headline', sh0.currentRoles.length === 3 && sh0.currentRoles[2].title === 'CEO' && sh0.currentRoles[0].company.startsWith('Vellore'), sh0.currentRoles);
+  check('current title matches the header company', sh0.currentTitle === 'CEO', sh0.currentTitle);
+  await panel3.click('#refresh-profile');
+  await panel3.waitForFunction(() => /roles/.test(document.getElementById('p-quality').textContent), null, { timeout: 15000 });
+  const sh = (await sw.evaluate(() => Sessions.get('sheena-multi-test'))).profile;
+  check('lazy sections load when an inner panel scrolls', sh.experienceEntries.length === 4 && sh.about.includes('medical AI') && sh.skills.length === 2, [sh.experienceEntries.length, sh.about, sh.skills]);
+  check('all current roles kept from Experience', sh.currentRoles.length === 3 && sh.currentTitle === 'Chief Executive Officer' && sh.currentCompany === 'MEDxAI INNOVATIONS Pvt. Ltd.', [sh.currentTitle, sh.currentRoles]);
+  check('only ended jobs count as past companies', sh.pastCompanies.join() === 'SSN College of Engineering', sh.pastCompanies);
+  check('inner panel scroll position restored', (await li.evaluate(() => document.getElementById('workspace').scrollTop)) === 0);
+  check('recipient: founder/CEO', (await panel3.textContent('#rc-chip')).includes('Founder'));
+
   await li.goto('https://www.linkedin.com/in/alex-chen-test/');
   await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Alex Chen', null, { timeout: 8000 });
   await panel3.waitForSelector('#result:not(.hidden)');
@@ -526,11 +543,28 @@ async function main() {
   check('another version is actually different', (await panel3.inputValue('#message')) !== free1);
   await shot('18-free-mode', panel3);
 
+  console.log('\nRecipient-aware purpose');
+  check('recipient chip shows who they are', (await panel3.textContent('#rc-chip')).includes('Senior engineer') && (await panel3.textContent('#rc-why')).includes('Senior ML Engineer'));
+  await panel3.selectOption('#opt-purpose', 'Auto');
+  check('Auto explains its pick', (await panel3.textContent('#purpose-hint')).includes('Career advice'));
+  await panel3.selectOption('#opt-purpose', 'Job');
+  await panel3.waitForSelector('#purpose-warn:not(.hidden)');
+  check('warns when the purpose does not fit', (await panel3.textContent('#purpose-warn-text')).includes('probably doesn’t hire directly'));
+  await panel3.click('#purpose-warn-btn');
+  check('one click switches to the suggested purpose', (await panel3.inputValue('#opt-purpose')) === 'Advice' && await panel3.isHidden('#purpose-warn'));
+  vb = await panel3.textContent('#v-label');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  check('the ask matches (career advice)', /question about your path|advice/i.test(await panel3.inputValue('#message')), await panel3.inputValue('#message'));
+  await shot('20-recipient', panel3);
+
   await panel3.click('#opt-mode [data-value="deep"]');
   check('deep hint explains free research', (await panel3.textContent('#mode-hint')).includes('from their profile'));
-  vb = await panel3.textContent('#v-label');
+  // Versions are capped at 12 per person, so wait for a new version id rather than the counter.
+  const lastId = async () => (await sw.evaluate(() => Sessions.get('priya-sharma-test'))).versions.slice(-1)[0]?.id;
+  const idBefore = await lastId();
   await panel3.click('#primary-btn');
-  await panel3.waitForFunction((b) => document.getElementById('v-label').textContent !== b, vb, { timeout: 10000 });
+  for (let i = 0; i < 50 && (await lastId()) === idBefore; i++) await sleep(200);
   const freeHooks = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
   check('free deep mode: profile hooks, no web calls', freeHooks.some(t => t.startsWith('Recently posted')) && (await getLog()).length === callsBefore, freeHooks);
   await panel3.click('#opt-mode [data-value="quick"]');

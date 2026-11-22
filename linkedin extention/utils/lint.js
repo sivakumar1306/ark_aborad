@@ -37,9 +37,11 @@ const Lint = (() => {
     if (ph) issues.push({ id: 'placeholder', level: 'error', title: `Placeholder left in: ${ph[0]}`, detail: 'Fill it in or remove it before sending.', match: ph[0] });
 
     // Greeting with the wrong name. Embarrassing and common.
-    const first = String(ctx.recipientName || '').split(/\s+/)[0];
-    const greet = body.match(/^\s*(?:hi|hello|hey|dear)\s+([A-Z][\w'-]+)/i);
-    if (first && greet && greet[1].toLowerCase() !== first.toLowerCase() && !/^(there|team|all)$/i.test(greet[1])) {
+    // "Dear Dr. Pravin" (title + last name) and "Hi Sheena" (first name) are both right.
+    const first = ctx.recipientName ? Names.first(ctx.recipientName) : '';
+    const last = ctx.recipientName ? Names.last(ctx.recipientName) : '';
+    const greet = body.match(/^\s*(?:hi|hello|hey|dear)\s+(?:(?:dr|prof|mr|mrs|ms)\.?\s+)?([A-Z][\w'-]+)/i);
+    if (first && greet && ![first, last].some(n => n && greet[1].toLowerCase() === n.toLowerCase()) && !/^(there|team|all)$/i.test(greet[1])) {
       issues.push({ id: 'wrong-name', level: 'error', title: `Greets “${greet[1]}”, but this is ${first}`, detail: 'Wrong name in the greeting.', match: greet[1] });
     }
 

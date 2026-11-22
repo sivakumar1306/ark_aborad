@@ -40,6 +40,9 @@ Pick three. Don't list everything:
 4. Click **✦ Fix with AI**. *"It tells the model exactly which sentence was unsupported, plus any clichés, and checks the result again."* The check goes green.
 5. Be upfront: *"It's a heuristic. It flags, it doesn't judge truth, which is why the label says 'check before sending'."*
 
+## 4:35 Demo: right message for the right person (15s)
+- Open a student's profile with Purpose set to "Job opportunity". The warning appears: *"They look like a student, so they likely can't help with roles."* Click **Switch to Networking**. *"A message can be well written and still wrong for the person. Auto picks what they can actually help with."*
+
 ## 4:50 Demo: follow-up and insights (45s)
 - **Tracker** tab: status, search, filters. *"Writing is half the job; most replies come from the follow-up."* Show the reminder setting and CSV export.
 - **Insights**: *"Every message records how it was written, so once you mark replies, it tells you what works, like whether common-ground openers get more replies."* (With few real replies yet, say it's built to learn as you use it.)

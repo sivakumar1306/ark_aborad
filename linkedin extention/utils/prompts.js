@@ -32,6 +32,7 @@ const Prompts = (() => {
   function compactProfile(p = {}) {
     const out = {
       name: p.name, headline: p.headline, currentTitle: p.currentTitle, currentCompany: p.currentCompany,
+      currentRoles: (p.currentRoles || []).length > 1 ? p.currentRoles.map(r => [r.title, r.company].filter(Boolean).join(' at ')) : undefined,
       location: p.location, about: (p.about || '').slice(0, 1200),
       recentPosts: (p.recentPosts || []).slice(0, 3),
       experience: (p.experienceEntries || []).slice(0, 5).map(e => [e.title, e.company && `at ${e.company}`, e.duration].filter(Boolean).join(' ')),
@@ -55,7 +56,9 @@ const Prompts = (() => {
         bio: ctx.sender?.bio || undefined,
         profile: ctx.sender?.profile ? compactProfile(ctx.sender.profile) : undefined
       },
-      purpose: ctx.purpose,
+      purpose: ctx.purpose === 'Advice' ? 'Career advice' : ctx.purpose,
+      recipient_type: ctx.recipientType || undefined,
+      address_them_as: typeof Names !== 'undefined' ? Names.greeting(ctx.profile?.name, ctx.tone) : undefined,
       tone: ctx.tone
     };
     const content = [];

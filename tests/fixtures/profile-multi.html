@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Dr. Sheena Christabel Pravin | LinkedIn</title>
+<style>
+  /* This layout scrolls an inner panel, not the window. */
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui; }
+  #workspace { height: 100vh; overflow-y: auto; }
+  section { margin: 10px; padding: 16px; background: #fff; border: 1px solid #ddd; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #spacer { height: 1600px; }
+</style></head>
+<body>
+<div id="workspace">
+<main>
+  <section>
+    <h1>Dr. Sheena Christabel Pravin</h1>
+    <div class="text-body-medium break-words">Assistant Director (IIC), Associate Professor, Vellore Institute of Technology, Chennai and CEO, MEDxAI INNOVATIONS Pvt. Ltd.</div>
+    <span class="text-body-small inline t-black--light break-words">Chennai, Tamil Nadu, India</span>
+    <ul>
+      <li><button aria-label="Current company: MEDxAI INNOVATIONS Pvt. Ltd.. Click to skip to experience card"><span>MEDxAI INNOVATIONS Pvt. Ltd.</span></button></li>
+      <li><button aria-label="Education: Anna University. Click to skip to education card"><span>Anna University</span></button></li>
+    </ul>
+  </section>
+  <section><div id="content_collections"></div>
+    <h2><span aria-hidden="true">Activity</span></h2>
+    <ul><li><div class="update-components-text"><span dir="ltr">During this interaction, we had the privilege of presenting Cervilens, highlighting its technological capabilities and clinical relevance.</span></div></li></ul>
+  </section>
+  <div id="spacer"></div>
+  <div id="lazy"></div>
+</main>
+</div>
+<script>
+  // Lower sections render only once the inner panel has been scrolled.
+  const ws = document.getElementById('workspace');
+  let done = false;
+  ws.addEventListener('scroll', () => {
+    if (done || ws.scrollTop < 400) return;
+    done = true;
+    document.getElementById('lazy').outerHTML = `
+      <section><div id="about"></div><h2><span aria-hidden="true">About</span></h2>
+        <div><span aria-hidden="true">Researcher in medical AI. I lead innovation at VIT Chennai and build AI diagnostics at MEDxAI.</span></div></section>
+      <section><div id="experience"></div><h2><span aria-hidden="true">Experience</span></h2>
+        <ul>
+          <li><span aria-hidden="true">Chief Executive Officer</span><span aria-hidden="true">MEDxAI INNOVATIONS Pvt. Ltd. · Full-time</span><span aria-hidden="true">Mar 2023 - Present · 2 yrs 9 mos</span></li>
+          <li><span aria-hidden="true">Assistant Director (IIC)</span><span aria-hidden="true">Vellore Institute of Technology · Full-time</span><span aria-hidden="true">Jun 2022 - Present · 3 yrs 6 mos</span></li>
+          <li><span aria-hidden="true">Associate Professor</span><span aria-hidden="true">Vellore Institute of Technology · Full-time</span><span aria-hidden="true">Jul 2015 - Present · 10 yrs 5 mos</span></li>
+          <li><span aria-hidden="true">Assistant Professor</span><span aria-hidden="true">SSN College of Engineering · Full-time</span><span aria-hidden="true">2009 - 2015 · 6 yrs</span></li>
+        </ul></section>
+      <section><div id="education"></div><h2><span aria-hidden="true">Education</span></h2>
+        <ul><li><span aria-hidden="true">Anna University</span><span aria-hidden="true">PhD, Biomedical Engineering</span></li></ul></section>
+      <section><div id="skills"></div><h2><span aria-hidden="true">Skills</span></h2>
+        <ul><li><span aria-hidden="true">Medical Imaging</span></li><li><span aria-hidden="true">Deep Learning</span></li></ul></section>`;
+  });
+</script>
+</body></html>
