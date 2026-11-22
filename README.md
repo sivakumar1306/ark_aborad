@@ -155,7 +155,7 @@ linkedin extention/
   - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.
   - The Claude client: headers, 401/429/529/credit errors, refusal, truncation, cost.
   - Research parsing: made-up source URLs are dropped.
-- **`tests/e2e.js`**: 117 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
+- **`tests/e2e.js`**: 123 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
   - onboarding (free, or with a key) and key testing
   - scraping both page layouts
   - LinkedIn swapping pages before the content updates

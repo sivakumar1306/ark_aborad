@@ -103,13 +103,16 @@
 
   // Visible leaf text. LinkedIn duplicates every string in a visually-hidden span;
   // the aria-hidden="true" copy is the one users see, so prefer it when present.
+  // LinkedIn renders most strings twice: a visible copy (often span[aria-hidden="true"])
+  // and a screen-reader copy (.visually-hidden). Take every visible text element,
+  // skip the screen-reader copies, and treat text broken only by <br> as one leaf.
+  const isLeaf = (el) => Array.from(el.children).every(c => c.tagName === 'BR');
   function leafTexts(root) {
     if (!root) return [];
-    let els = Array.from(root.querySelectorAll('span[aria-hidden="true"]'));
-    if (!els.length) {
-      els = Array.from(root.querySelectorAll('p, span, a, div'))
-        .filter(el => el.children.length === 0 && !el.closest('.visually-hidden, .sr-only'));
-    }
+    const els = Array.from(root.querySelectorAll('span[aria-hidden="true"], p, span, a, h3, h4, div'))
+      .filter(el => !el.closest('.visually-hidden, .sr-only'))
+      .filter(el => el.matches('span[aria-hidden="true"]') || isLeaf(el))
+      .filter(el => !el.parentElement?.closest('span[aria-hidden="true"]')); // already covered by its parent
     const out = [];
     for (const el of els) {
       const t = clean(el.innerText || el.textContent);
@@ -175,14 +178,18 @@
     const skillSection = getSection('skills');
     let skills = topItems(skillSection).map(li => leafTexts(li)[0]);
     if (!skills.length) skills = leafTexts(skillSection);
+    if (!skills.length && skillSection) skills = visibleLines(skillSection);
     skills = [...new Set(skills.filter(t => t && !/^skills$/i.test(t) && t.length < 60 && !DATE_RE.test(t) && !/passed|assessment|dialog|window|escape/i.test(t)))];
 
     // Recent posts
     const recentPosts = [];
     const act = getSection('activity');
     if (act) {
+      // Post text has nested links/hashtags, so read whole visible lines rather than leaves.
       const items = topItems(act);
-      const sources = items.length ? items.map(li => leafTexts(li).sort((a, b) => b.length - a.length)[0]) : leafTexts(act);
+      const sources = items.length
+        ? items.map(li => postTextOf(li))
+        : visibleLines(act).filter(t => t.length > 40);
       for (const t of sources) {
         if (t && t.length > 40 && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
           recentPosts.push(t.slice(0, 500));
@@ -205,6 +212,21 @@
       profileUrl:        window.location.origin + window.location.pathname.replace(/\/+$/, '') + '/',
       rawTitle:          document.title
     };
+  }
+
+  // Visible text of an element as clean lines (innerText respects layout and hides screen-reader copies' CSS).
+  function visibleLines(el) {
+    return String(el.innerText || '').split('\n').map(clean)
+      .map(t => t.replace(/…\s*(see )?more$/i, '').trim())
+      .filter(t => t.length > 1 && !JUNK_RE.test(t));
+  }
+
+  function postTextOf(item) {
+    const preferred = Array.from(item.querySelectorAll('.update-components-text, .feed-shared-inline-show-more-text, [dir="ltr"]'))
+      .map(e => clean(e.innerText || e.textContent));
+    const lines = [...preferred, ...visibleLines(item)]
+      .filter(t => t.length > 40 && !/hasn.t posted|reposted this|commented on|liked this|followers?$|^\d+ (comments?|reposts?|reactions?)/i.test(t));
+    return lines.sort((a, b) => b.length - a.length)[0] || '';
   }
 
   function parseExperience(section) {
