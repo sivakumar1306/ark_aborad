@@ -12,7 +12,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Auto', tone: 'Neutral', format: 'note', mode: 'quick' };
-const BUILD = '4.5.1'; // must match background.js
+const BUILD = '4.5.2'; // must match background.js
 
 const state = {
   tab: null,
@@ -866,9 +866,16 @@ function aiLabel() {
   return Gemini.isGeminiKey(userApiKey) ? Gemini.label(geminiModel || Gemini.FALLBACK_MODEL) : Claude.MODELS[writerModel || 'claude-haiku-5-5'];
 }
 
+let keyTestRunning = false;
 async function testKey(input, btn, statusEl) {
   const key = Gemini.cleanKey(input.value);
   if (!key) { input.focus(); return null; }
+  if (keyTestRunning) return null; // the auto-test after pasting and a click shouldn't overlap
+  keyTestRunning = true;
+  try { return await runKeyTest(key, btn, statusEl); } finally { keyTestRunning = false; }
+}
+
+async function runKeyTest(key, btn, statusEl) {
   btn.disabled = true;
   const prev = btn.textContent;
   btn.textContent = 'Testing…';
@@ -903,7 +910,10 @@ function renderKeyStatus() {
 function showKeyStatus(elm, ks) {
   elm.classList.remove('hidden');
   elm.dataset.status = ks.status;
-  elm.textContent = ks.status === 'valid' ? (ks.provider === 'gemini' ? `✓ Gemini key works. Using ${Gemini.label(ks.model)}.` : '✓ Key works. AI mode is on.')
+  elm.textContent = ks.status === 'valid'
+    ? (ks.provider === 'gemini'
+      ? `✓ Gemini key works. Using ${Gemini.label(ks.model)}.${ks.slow ? ' Google was slow to answer the test, so messages may take a few seconds.' : ''}`
+      : '✓ Key works. AI mode is on.')
     : ks.status === 'invalid' ? `✗ ${ks.reason || 'That key didn’t work.'}`
     : `⚠ ${ks.reason || 'Couldn’t check the key right now.'} Saved; it’ll be used on the next message.`;
 }

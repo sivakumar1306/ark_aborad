@@ -17,7 +17,7 @@ const FOLLOWUP_ALARM = 'ark-followups';
 // Bumped with code changes. The panel compares it with its own: after a `git pull`,
 // the panel reloads from disk but this worker keeps the old code until the extension
 // is reloaded in chrome://extensions.
-const BUILD = '4.5.1';
+const BUILD = '4.5.2';
 const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ async function write(key, options = {}, settings) {
       const gm = settings.geminiModel || Gemini.FALLBACK_MODEL;
       const prompt = Prompts.writerPrompt(writerCtx);
       const data = await Gemini.generate(settings.userApiKey, { model: gm, system: prompt.system, text: prompt.text, pdfBase64: prompt.pdfBase64 },
-        { timeoutMs: 60000, retries: 2, onRetry: retryNotice(key) });
+        { timeoutMs: 90000, retries: 2, onRetry: retryNotice(key) }); // free tier can be slow
       text = Gemini.textOf(data);
       engine = `gemini:${gm}`;
     } else {
@@ -447,12 +447,20 @@ async function testKey(rawKey) {
   try {
     if (Gemini.isGeminiKey(key)) {
       // Google retires models often: ask which ones this key can use, pick the newest Flash.
+      // Listing models proves the key is valid. The test message then proves the
+      // project may generate (Google can refuse free-tier use). The free tier is
+      // sometimes slow, so a slow answer still counts as a working key.
       const model = await Gemini.pickModel(key);
-      const data = await Gemini.generate(key, { model, system: 'Follow the instruction exactly.', text: 'Reply with the single word: OK', maxTokens: 1024 },
-        { timeoutMs: 30000, retries: 1 });
-      Gemini.textOf(data);
       save.geminiModel = model;
-      status = { status: 'valid', provider: 'gemini', model };
+      try {
+        const data = await Gemini.generate(key, { model, system: 'Follow the instruction exactly.', text: 'Reply with the single word: OK', maxTokens: 1024 },
+          { timeoutMs: 45000, retries: 0 });
+        Gemini.textOf(data);
+        status = { status: 'valid', provider: 'gemini', model };
+      } catch (err) {
+        if (err.code !== 'timeout') throw err;
+        status = { status: 'valid', provider: 'gemini', model, slow: true };
+      }
     } else {
       const data = await Claude.create(key, {
         model: 'claude-haiku-5-5', max_tokens: 1024, output_config: { effort: 'low' },
