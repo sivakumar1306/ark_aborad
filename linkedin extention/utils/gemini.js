@@ -71,7 +71,7 @@ const Gemini = (() => {
     }
     if (status === 429 || gStatus === 'RESOURCE_EXHAUSTED') {
       const daily = /per day|daily|quota exceeded.*day/i.test(msg);
-      return new E(daily ? 'You’ve used today’s free Gemini quota. It resets tomorrow, or use free mode.' : 'Gemini rate limit hit (free tier). Retrying shortly…',
+      return new E(daily ? 'You’ve used today’s free Gemini quota. It resets tomorrow, or use free mode.' : 'Gemini’s free-tier rate limit was hit. Wait a minute and try again, or switch Research to Quick (fewer requests).',
         { code: 'rate_limit', status, retryable: !daily, retryAfter: 6 });
     }
     if (status >= 500 || gStatus === 'UNAVAILABLE') {

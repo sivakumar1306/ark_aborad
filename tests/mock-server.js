@@ -16,6 +16,7 @@ const VALID_KEY = 'sk-ant-test-valid-key-0123456789abcdef';
 const GEMINI_KEY = 'AIzaTEST-valid-key-0123456789abcdefghijk';
 const log = [];
 let flaked = false;
+let searchLimited = false; // POST /__search_limit toggles Gemini search rate-limiting
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -116,6 +117,7 @@ const server = http.createServer(async (req, res) => {
   const err = (status, type, msg) => send(status, { type: 'error', error: { type, message: msg }, request_id: 'req_mock' });
 
   if (req.method === 'GET' && req.url === '/__log') return send(200, log);
+  if (req.method === 'POST' && req.url === '/__search_limit') { searchLimited = !searchLimited; return send(200, { searchLimited }); }
   if (req.method === 'POST' && req.url === '/__reset') { log.length = 0; flaked = false; return send(200, { ok: true }); }
 
   let raw = '';
@@ -174,6 +176,9 @@ async function gemini(req, body, send) {
     usageMetadata: { promptTokenCount: 1200, candidatesTokenCount: 150 }
   });
   if (/single word: OK/.test(text)) return answer('OK');
+  if ((body.tools || []).some(t => t.google_search) && searchLimited) {
+    return gerr(429, 'RESOURCE_EXHAUSTED', 'Quota exceeded for grounding requests per minute.');
+  }
   if ((body.tools || []).some(t => t.google_search)) {
     await sleep(500);
     const who = JSON.parse(/<person>\s*([\s\S]*?)\s*<\/person>/.exec(text)?.[1] || '{}');

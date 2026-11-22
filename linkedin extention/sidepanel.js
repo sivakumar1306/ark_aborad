@@ -12,7 +12,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Auto', tone: 'Neutral', format: 'note', mode: 'quick' };
-const BUILD = '4.5.3'; // must match background.js
+const BUILD = '4.5.4'; // must match background.js
 
 const state = {
   tab: null,

@@ -17,7 +17,7 @@ const FOLLOWUP_ALARM = 'ark-followups';
 // Bumped with code changes. The panel compares it with its own: after a `git pull`,
 // the panel reloads from disk but this worker keeps the old code until the extension
 // is reloaded in chrome://extensions.
-const BUILD = '4.5.3';
+const BUILD = '4.5.4';
 const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'geminiModels', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -141,18 +141,38 @@ async function jobGenerate({ tabId, key, mode, options }) {
     if (useAI) {
       await Sessions.update(key, x => { x.stage = 'researching'; x.steps.research = 'running'; x.notice = `Searching the web for recent news about ${profile.currentCompany || profile.name}…`; return x; });
       // The key decides the provider: AIza… is Gemini (Google Search grounding), sk-ant-… is Claude (web search).
-      const r = Gemini.isGeminiKey(settings.userApiKey)
-        ? (await geminiWithFallback(settings, (m) => Prompts.researchGemini(settings.userApiKey, m, profile, { onRetry: retryNotice(key) }))).result
-        : await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
-      // Web hooks first, then the strongest profile hooks (their posts).
-      const hooks = [...r.hooks, ...local.filter(h => h.kind === 'post')].slice(0, 6);
-      await Sessions.update(key, x => {
-        x.research = { source: 'web', searches: r.searches, cost: r.cost, at: Date.now() };
-        x.hooks = hooks.map((h, i) => ({ ...h, selected: i < 3 }));
-        x.steps.research = 'done';
-        x.notice = `${r.searches} search${r.searches === 1 ? '' : 'es'} · ${r.hooks.length} sourced hook${r.hooks.length === 1 ? '' : 's'} · ${Gemini.isGeminiKey(settings.userApiKey) ? 'free tier' : Claude.formatCost(r.cost)}`;
-        return x;
-      });
+      let r = null, skipped = null;
+      try {
+        r = Gemini.isGeminiKey(settings.userApiKey)
+          ? (await geminiWithFallback(settings, (m) => Prompts.researchGemini(settings.userApiKey, m, profile, { onRetry: retryNotice(key) }))).result
+          : await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
+      } catch (err) {
+        // Web research is extra. If it's rate-limited or unavailable, keep going with
+        // profile hooks rather than failing the whole message. A bad key still fails.
+        if (['auth', 'no_key'].includes(err.code)) throw err;
+        skipped = err;
+      }
+      if (r) {
+        // Web hooks first, then the strongest profile hooks (their posts).
+        const hooks = [...r.hooks, ...local.filter(h => h.kind === 'post')].slice(0, 6);
+        await Sessions.update(key, x => {
+          x.research = { source: 'web', searches: r.searches, cost: r.cost, at: Date.now() };
+          x.hooks = hooks.map((h, i) => ({ ...h, selected: i < 3 }));
+          x.steps.research = 'done';
+          x.notice = `${r.searches} search${r.searches === 1 ? '' : 'es'} · ${r.hooks.length} sourced hook${r.hooks.length === 1 ? '' : 's'} · ${Gemini.isGeminiKey(settings.userApiKey) ? 'free tier' : Claude.formatCost(r.cost)}`;
+          return x;
+        });
+      } else {
+        await Sessions.update(key, x => {
+          x.research = { source: 'profile', at: Date.now(), skipped: skipped.code };
+          x.hooks = local.map((h, i) => ({ ...h, selected: i < 2 }));
+          x.steps.research = 'done';
+          x.notice = skipped.code === 'rate_limit'
+            ? 'Web search hit the free-tier limit, so these hooks come from their profile'
+            : 'Web search unavailable right now, so these hooks come from their profile';
+          return x;
+        });
+      }
     } else {
       await Sessions.update(key, x => {
         x.research = { source: 'profile', at: Date.now() };
@@ -281,6 +301,7 @@ async function write(key, options = {}, settings) {
       : engine.startsWith('gemini:')
         ? `Written in ${secs}s · ${Gemini.label(engine.slice(7))} · free tier`
         : `Written in ${secs}s · ${Claude.MODELS[engine] || engine} · ${Claude.formatCost(cost + researchCost)}`;
+    if (useDeep && x.research?.skipped) x.notice += ' · web search skipped (limit), used profile hooks';
     return x;
   });
 

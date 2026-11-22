@@ -610,6 +610,14 @@ async function main() {
   check('Gemini research uses Google Search grounding', !!gr);
   check('only grounded sources kept (made-up domain dropped)', gHooks.some(t => t.includes('techcrunch.com')) && gHooks.some(t => t.includes('pydata.org')) && !gHooks.some(t => t.includes('Forbes')), gHooks);
   await shot('21-gemini', panel3);
+  // Web search rate-limited on the free tier → Deep mode still writes, from profile hooks.
+  await fetch(`${MOCK}/__search_limit`, { method: 'POST' });
+  await li.goto('https://www.linkedin.com/in/sheena-multi-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Dr. Sheena Christabel Pravin', null, { timeout: 8000 });
+  await panel3.click('#primary-btn');
+  await panel3.waitForFunction(() => /web search skipped/.test(document.getElementById('step-note').textContent) || !document.getElementById('error-banner').classList.contains('hidden'), null, { timeout: 30000 });
+  check('search limit → message still written from profile hooks', /web search skipped/.test(await panel3.textContent('#step-note')) && await panel3.isHidden('#error-banner'), await panel3.textContent('#step-note'));
+  await fetch(`${MOCK}/__search_limit`, { method: 'POST' });
   await panel3.click('#opt-mode [data-value="quick"]');
   await panel3.click('#tab-settings');
   await panel3.click('#remove-key');
