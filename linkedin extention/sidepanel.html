@@ -281,23 +281,23 @@
           <div class="card card-accent">
             <div class="card-title">How messages are written</div>
             <div class="engine-state" id="engine-state"></div>
-            <label class="field-label" for="api-key">Anthropic API key <span class="muted">(optional)</span></label>
+            <label class="field-label" for="api-key">API key <span class="muted">(optional · Anthropic or Google Gemini)</span></label>
             <div class="key-row">
-              <input id="api-key" class="input mono-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+              <input id="api-key" class="input mono-key" type="password" placeholder="sk-ant-… or AIza…" autocomplete="off" spellcheck="false" />
               <button class="icon-btn" id="key-show" type="button" aria-label="Show key" title="Show / hide">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
               </button>
               <button class="btn btn-primary" id="test-key-btn" type="button">Test</button>
             </div>
             <div class="key-status hidden" id="key-status" role="status"></div>
-            <label class="field" style="margin-top:10px">
+            <label class="field" id="model-field" style="margin-top:10px">
               <span class="field-label">Claude model</span>
               <select id="set-model" class="input select">
                 <option value="claude-haiku-5-5">Haiku 5.5 · fastest, under $0.001 per message</option>
                 <option value="claude-sonnet-5-5">Sonnet 5.5 · stronger writing, about $0.01 per message</option>
               </select>
             </label>
-            <p class="hint">No key? Messages are written on your device for free. With a key, Claude writes them and Deep mode searches the web. Your key stays on this device and is only ever sent to api.anthropic.com. <button class="link danger hidden" type="button" id="remove-key">Remove key</button></p>
+            <p class="hint">No key? Messages are written on your device for free. Want AI for free? Get a Gemini key at aistudio.google.com (free tier, no card). With a key, AI writes the messages and Deep mode searches the web. Your key stays on this device and is only ever sent to api.anthropic.com. <button class="link danger hidden" type="button" id="remove-key">Remove key</button></p>
           </div>
 
           <div class="card">
@@ -404,10 +404,10 @@
               <span>Written on your device from their profile. No key, no cost.</span>
             </button>
             <div class="ob-choice">
-              <b>Use my Anthropic API key</b>
-              <span>Claude writes each message (under $0.001) and Deep mode searches the web.</span>
+              <b>Use my API key</b>
+              <span>Google Gemini (free tier, key from aistudio.google.com) or Anthropic Claude (under $0.001 a message). Deep mode searches the web.</span>
               <div class="key-row">
-                <input id="ob-key" class="input mono-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+                <input id="ob-key" class="input mono-key" type="password" placeholder="AIza… or sk-ant-…" autocomplete="off" spellcheck="false" />
                 <button class="btn btn-primary" id="ob-test" type="button">Test</button>
               </div>
               <div class="key-status hidden" id="ob-key-status" role="status"></div>
@@ -453,6 +453,7 @@
   <script src="utils/lint.js"></script>
   <script src="utils/recipient.js"></script>
   <script src="utils/api.js"></script>
+  <script src="utils/gemini.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

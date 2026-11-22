@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Outreach AI",
-  "version": "4.4.2",
-  "description": "Personalised, fact-checked LinkedIn outreach from the profile you're viewing. Free on-device mode, or Claude with your own API key. No license key.",
+  "version": "4.5.0",
+  "description": "Personalised, fact-checked LinkedIn outreach from the profile you're viewing. Free on-device mode, or Claude / Gemini with your own API key. No license key.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
@@ -16,7 +16,8 @@
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://api.anthropic.com/*"
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js"

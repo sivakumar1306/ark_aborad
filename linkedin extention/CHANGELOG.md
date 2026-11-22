@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.5.0: Google Gemini as a second provider
+
+- Paste either an Anthropic key (`sk-ant-…`) or a Google Gemini key (`AIza…`, free tier from aistudio.google.com). The provider is detected from the key.
+- Gemini model chosen automatically on Test: the newest stable Flash model the key can use (Google retires versions often, so nothing is hard-coded).
+- Deep mode on Gemini uses Google Search grounding; hooks are kept only if their source domain is one Gemini actually grounded on.
+- Same prompt, fact check, recipient awareness and Fix with AI for both providers. Gemini errors (invalid key, per-minute vs daily free-tier quota, overload, safety blocks) get the same plain-English handling and "Write in free mode" recovery.
+
 ## 4.4.2: Names with titles
 
 - Fixed: “Dear Dr.,”. Titles (Dr., Prof., Mr./Ms., Er., Shri/Smt., …), credentials (PhD, MBA…), pronouns and emoji are stripped from names (`utils/names.js`). Formal tone addresses doctors and professors as “Dear Dr. Pravin,”; other tones use the first name (“Hi Sheena,”).

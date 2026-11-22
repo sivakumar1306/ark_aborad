@@ -11,10 +11,10 @@
 // There is no company server and no license key.
 
 importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js',
-  'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js', 'utils/names.js');
+  'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js', 'utils/names.js', 'utils/gemini.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
-const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
+const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(() => {
@@ -135,14 +135,17 @@ async function jobGenerate({ tabId, key, mode, options }) {
     const local = LocalWriter.hooks(profile);
     if (useAI) {
       await Sessions.update(key, x => { x.stage = 'researching'; x.steps.research = 'running'; x.notice = `Searching the web for recent news about ${profile.currentCompany || profile.name}…`; return x; });
-      const r = await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
+      // The key decides the provider: AIza… is Gemini (Google Search grounding), sk-ant-… is Claude (web search).
+      const r = Gemini.isGeminiKey(settings.userApiKey)
+        ? await Prompts.researchGemini(settings.userApiKey, settings.geminiModel || Gemini.FALLBACK_MODEL, profile, { onRetry: retryNotice(key) })
+        : await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
       // Web hooks first, then the strongest profile hooks (their posts).
       const hooks = [...r.hooks, ...local.filter(h => h.kind === 'post')].slice(0, 6);
       await Sessions.update(key, x => {
         x.research = { source: 'web', searches: r.searches, cost: r.cost, at: Date.now() };
         x.hooks = hooks.map((h, i) => ({ ...h, selected: i < 3 }));
         x.steps.research = 'done';
-        x.notice = `${r.searches} search${r.searches === 1 ? '' : 'es'} · ${r.hooks.length} sourced hook${r.hooks.length === 1 ? '' : 's'} · ${Claude.formatCost(r.cost)}`;
+        x.notice = `${r.searches} search${r.searches === 1 ? '' : 'es'} · ${r.hooks.length} sourced hook${r.hooks.length === 1 ? '' : 's'} · ${Gemini.isGeminiKey(settings.userApiKey) ? 'free tier' : Claude.formatCost(r.cost)}`;
         return x;
       });
     } else {
@@ -206,7 +209,7 @@ async function write(key, options = {}, settings) {
       revise:    options.revise,
       recipient
     });
-    const body = Prompts.writerBody({
+    const writerCtx = {
       model, profile, hooks,
       common: options.commonGround,
       recipientType: recipient?.type,
@@ -215,11 +218,20 @@ async function write(key, options = {}, settings) {
       tone: options.tone || 'Neutral',
       requirements,
       resumeBase64: settings.resumeBase64 || null
-    });
-    const data = await Claude.create(settings.userApiKey, body, { timeoutMs: 60000, retries: 2, betas: Prompts.betasFor(model), onRetry: retryNotice(key) });
-    text = Claude.textOf(data);
-    cost = Claude.cost(model, data.usage);
-    engine = model;
+    };
+    if (Gemini.isGeminiKey(settings.userApiKey)) {
+      const gm = settings.geminiModel || Gemini.FALLBACK_MODEL;
+      const prompt = Prompts.writerPrompt(writerCtx);
+      const data = await Gemini.generate(settings.userApiKey, { model: gm, system: prompt.system, text: prompt.text, pdfBase64: prompt.pdfBase64 },
+        { timeoutMs: 60000, retries: 2, onRetry: retryNotice(key) });
+      text = Gemini.textOf(data);
+      engine = `gemini:${gm}`;
+    } else {
+      const data = await Claude.create(settings.userApiKey, Prompts.writerBody(writerCtx), { timeoutMs: 60000, retries: 2, betas: Prompts.betasFor(model), onRetry: retryNotice(key) });
+      text = Claude.textOf(data);
+      cost = Claude.cost(model, data.usage);
+      engine = model;
+    }
     if (settings.keyStatus?.status !== 'valid') setKeyStatus({ status: 'valid' });
   } else {
     text = LocalWriter.write({
@@ -261,7 +273,9 @@ async function write(key, options = {}, settings) {
     const researchCost = options.researchCost || 0; // set when research ran in this same job
     x.notice = engine === 'local'
       ? 'Written on your device · free mode'
-      : `Written in ${secs}s · ${Claude.MODELS[engine] || engine} · ${Claude.formatCost(cost + researchCost)}`;
+      : engine.startsWith('gemini:')
+        ? `Written in ${secs}s · ${Gemini.label(engine.slice(7))} · free tier`
+        : `Written in ${secs}s · ${Claude.MODELS[engine] || engine} · ${Claude.formatCost(cost + researchCost)}`;
     return x;
   });
 
@@ -422,20 +436,31 @@ function bioFrom(p) {
 // ─── The user's own Anthropic API key (optional) ──────────────────────────────
 async function testKey(rawKey) {
   const key = (rawKey || '').trim();
-  if (!key) throw new Error('Paste your Anthropic API key first.');
+  if (!key) throw new Error('Paste an Anthropic (sk-ant-…) or Gemini (AIza…) API key first.');
   let status;
+  const save = {};
   try {
-    const data = await Claude.create(key, {
-      model: 'claude-haiku-5-5', max_tokens: 1024, output_config: { effort: 'low' },
-      messages: [{ role: 'user', content: 'Reply with the single word: OK' }]
-    }, { timeoutMs: 20000, retries: 1 });
-    Claude.textOf(data);
-    status = { status: 'valid' };
+    if (Gemini.isGeminiKey(key)) {
+      // Google retires models often: ask which ones this key can use, pick the newest Flash.
+      const model = await Gemini.pickModel(key);
+      const data = await Gemini.generate(key, { model, system: 'Follow the instruction exactly.', text: 'Reply with the single word: OK', maxTokens: 1024 },
+        { timeoutMs: 30000, retries: 1 });
+      Gemini.textOf(data);
+      save.geminiModel = model;
+      status = { status: 'valid', provider: 'gemini', model };
+    } else {
+      const data = await Claude.create(key, {
+        model: 'claude-haiku-5-5', max_tokens: 1024, output_config: { effort: 'low' },
+        messages: [{ role: 'user', content: 'Reply with the single word: OK' }]
+      }, { timeoutMs: 20000, retries: 1 });
+      Claude.textOf(data);
+      status = { status: 'valid', provider: 'anthropic' };
+    }
   } catch (err) {
     status = { status: ['auth', 'permission', 'billing'].includes(err.code) ? 'invalid' : 'unknown', reason: err.message, code: err.code };
   }
   status = { ...status, fingerprint: fingerprint(key), checkedAt: Date.now() };
-  const save = { keyStatus: status };
+  save.keyStatus = status;
   if (status.status !== 'invalid') save.userApiKey = key;
   await chrome.storage.local.set(save);
   return { keyStatus: status };

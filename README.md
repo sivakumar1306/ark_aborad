@@ -1,6 +1,6 @@
-# LinkedIn Outreach AI — v4.4
+# LinkedIn Outreach AI — v4.5
 
-Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest upstream version (v3.1, 19 Nov). It needs no license key and has no company server: messages are written **free on your device**, or by **Claude with your own Anthropic API key**.
+Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest upstream version (v3.1, 19 Nov). It needs no license key and has no company server: messages are written **free on your device**, or by **Claude or Gemini with your own API key** (Gemini has a free tier).
 
 **The headline:** AI outreach fails in two ways. It's *generic*, or it's *wrong*: a confident made-up "congrats on the promotion!" sent to a stranger under your name. v4 adds a **trust layer** that checks every claim in a message against what was actually read, before you hit Send. It also finds the real common ground between you and the person you're writing to.
 
@@ -12,12 +12,12 @@ Improvements to the Ark Abroad LinkedIn outreach extension, built on the latest 
 
 ## Two ways to write, both checked
 
-| | **Free mode** (default, no key) | **AI mode** (your Anthropic API key) |
+| | **Free mode** (default, no key) | **AI mode** (your Anthropic or Gemini API key) |
 |---|---|---|
-| Writer | On-device writer (`utils/localwriter.js`) | Claude Haiku 5.5 (or Sonnet 5.5), prompt in `utils/prompts.js` |
-| Deep mode | Picks hooks from their profile | Claude Sonnet 5.5 + web search: recent news, talks, launches, **each with its source link** |
+| Writer | On-device writer (`utils/localwriter.js`) | Claude Haiku 5.5 (or Sonnet 5.5), or Gemini Flash (picked automatically); same prompt in `utils/prompts.js` |
+| Deep mode | Picks hooks from their profile | Claude Sonnet 5.5 + web search, or Gemini + Google Search grounding: recent news, talks, launches, **each with its source link** |
 | Cost | $0 | About $0.0002 per message on Haiku; a Deep run with web search is about $0.02–$0.06. Shown after every message. |
-| Network | None | `api.anthropic.com` only |
+| Network | None | `api.anthropic.com` or `generativelanguage.googleapis.com` only |
 
 Upstream's free template always opened with *"I came across your profile and was impressed by your work…"*. Our own writing check flags that as a cliché. It also ignored LinkedIn's 200/300-character note limit and produced the same text every time. The new free writer:
 - uses only facts from the profile, so it passes the fact check by construction (unit-tested across 384 combinations of purpose, tone, format and version)
@@ -136,6 +136,7 @@ linkedin extention/
   utils/
     api.js           Claude Messages API client: timeouts, retries, errors, cost
     prompts.js       writer + web-research prompts; keeps only hooks with real sources
+    gemini.js        Google Gemini client: model auto-pick, errors, grounding sources
     localwriter.js   free on-device writer and profile hooks
     session.js       per-profile working state in chrome.storage.session
     formats.js       Note/DM/InMail/Email rules, the writing brief, meter, trim
@@ -152,17 +153,17 @@ linkedin extention/
 ## Install
 
 1. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `linkedin extention/`.
-2. Click the toolbar icon (or press `Alt+Shift+O`) to open the side panel. Start free, or paste an Anthropic API key (`sk-ant-…`) for AI mode.
+2. Click the toolbar icon (or press `Alt+Shift+O`) to open the side panel. Start free, or paste an Anthropic (`sk-ant-…`) or Google Gemini (`AIza…`, free at aistudio.google.com) key for AI mode.
 
 ## Tests
 
-- **`tests/unit.js`**: 83 checks.
+- **`tests/unit.js`**: 92 checks.
   - Fact check: true messages raise no false alarms; invented claims, sender claims and acronyms are handled.
   - Lint rules.
   - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.
   - The Claude client: headers, 401/429/529/credit errors, refusal, truncation, cost.
   - Research parsing: made-up source URLs are dropped.
-- **`tests/e2e.js`**: 140 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
+- **`tests/e2e.js`**: 149 checks that load the real extension in Chromium against LinkedIn-like fixture pages (`tests/fixtures/`) and a mock of the Anthropic Messages API (`tests/mock-server.js`). The mock returns thinking blocks, web search results, `pause_turn` and typed errors. The checks cover:
   - onboarding (free, or with a key) and key testing
   - scraping both page layouts
   - LinkedIn swapping pages before the content updates

@@ -13,6 +13,7 @@
 const http = require('http');
 
 const VALID_KEY = 'sk-ant-test-valid-key-0123456789abcdef';
+const GEMINI_KEY = 'AIzaTEST-valid-key-0123456789abcdefghijk';
 const log = [];
 let flaked = false;
 
@@ -128,6 +129,7 @@ const server = http.createServer(async (req, res) => {
   const entry = { path: req.url, body, headers, at: Date.now() };
   log.push(entry);
 
+  if (req.url.startsWith('/v1beta/')) return gemini(req, body, send);
   if (req.url !== '/v1/messages') return err(404, 'not_found_error', 'Not found');
   if (headers.key !== VALID_KEY) return err(401, 'authentication_error', 'invalid x-api-key');
   if (!headers.version) return err(400, 'invalid_request_error', 'anthropic-version header is required');
@@ -152,6 +154,46 @@ const server = http.createServer(async (req, res) => {
     { type: 'text', text: writeMessage(ctx, reqs) }
   ], { input_tokens: 1400, output_tokens: 180 }));
 });
+
+// ─── Gemini (generativelanguage.googleapis.com/v1beta) ─────────────────────────
+async function gemini(req, body, send) {
+  const gerr = (code, status, message) => send(code, { error: { code, status, message } });
+  if (req.headers['x-goog-api-key'] !== GEMINI_KEY) return gerr(400, 'INVALID_ARGUMENT', 'API key not valid. Please pass a valid API key.');
+  if (req.method === 'GET' && req.url.startsWith('/v1beta/models')) {
+    const m = (name, methods = ['generateContent', 'countTokens']) => ({ name: `models/${name}`, supportedGenerationMethods: methods });
+    return send(200, { models: [m('gemini-2.0-flash'), m('gemini-2.5-flash'), m('gemini-2.5-flash-lite'), m('gemini-2.5-pro'),
+      m('gemini-2.5-flash-preview-tts'), m('text-embedding-004', ['embedContent'])] });
+  }
+  const model = (/models\/([^:]+):generateContent/.exec(req.url) || [])[1];
+  if (!model) return gerr(404, 'NOT_FOUND', 'Not found');
+  const text = (body.contents?.[0]?.parts || []).map(p => p.text || '').join('\n');
+  const answer = (t, extra = {}) => send(200, {
+    candidates: [{ content: { role: 'model', parts: [{ text: 'Let me think…', thought: true }, { text: t }] }, finishReason: 'STOP', ...extra }],
+    usageMetadata: { promptTokenCount: 1200, candidatesTokenCount: 150 }
+  });
+  if (/single word: OK/.test(text)) return answer('OK');
+  if ((body.tools || []).some(t => t.google_search)) {
+    await sleep(500);
+    const who = JSON.parse(/<person>\s*([\s\S]*?)\s*<\/person>/.exec(text)?.[1] || '{}');
+    const co = who.currentCompany || 'Their company';
+    const hooks = [
+      { hook: `${co} raised a $40M Series B in October 2026 to expand in Europe`, url: 'https://techcrunch.com/2026/10/14/lumen-analytics-series-b/', date: '2026-10' },
+      { hook: `${who.name} spoke at PyData Berlin 2026 about feature stores`, url: 'https://pydata.org/berlin2026/speaker/priya-sharma/', date: '2026-09' },
+      { hook: `${who.name} was named to Forbes 30 Under 30`, url: 'https://made-up.example.com/forbes', date: '' }
+    ];
+    return answer(`Found two.\n<hooks>${JSON.stringify(hooks)}</hooks>`, {
+      groundingMetadata: {
+        webSearchQueries: [`${co} news 2026`],
+        groundingChunks: [
+          { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA', title: 'techcrunch.com' } },
+          { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/BBB', title: 'pydata.org' } }
+        ]
+      }
+    });
+  }
+  await sleep(300);
+  return answer(writeMessage(parseContext(text), requirements(text)));
+}
 
 const port = Number(process.env.PORT || 8787);
 server.listen(port, () => console.log(`mock Anthropic API on :${port}`));

@@ -9,7 +9,7 @@
 const $  = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
+const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Auto', tone: 'Neutral', format: 'note', mode: 'quick' };
 
@@ -336,7 +336,9 @@ function renderOptions() {
   const f = Formats.get(p.format, { noteLimit: noteLimit() });
   $('format-hint').textContent = f.desc;
   $('mode-hint').textContent = p.mode === 'deep'
-    ? (hasAI() ? 'Deep: Claude searches the web for recent news and public work, with a link for every hook (about $0.02 to $0.05).'
+    ? (hasAI() ? (Gemini.isGeminiKey(state.settings.userApiKey)
+        ? 'Deep: Gemini searches Google for recent news and public work, with a link for every hook (free tier).'
+        : 'Deep: Claude searches the web for recent news and public work, with a link for every hook (about $0.02 to $0.05).')
                : 'Deep: picks hooks from their profile. Add an API key in Settings for web research.')
     : '';
   $('mode-hint').classList.toggle('hidden', p.mode !== 'deep');
@@ -848,6 +850,12 @@ function fingerprint(key) {
 
 function hasAI() { return !!state.settings.userApiKey; }
 
+// "Haiku 5.5" or "Gemini 2.5 Flash", depending on which key is saved.
+function aiLabel() {
+  const { userApiKey, writerModel, geminiModel } = state.settings;
+  return Gemini.isGeminiKey(userApiKey) ? Gemini.label(geminiModel || Gemini.FALLBACK_MODEL) : Claude.MODELS[writerModel || 'claude-haiku-5-5'];
+}
+
 async function testKey(input, btn, statusEl) {
   const key = input.value.trim();
   if (!key) { input.focus(); return null; }
@@ -868,18 +876,21 @@ function renderKeyStatus() {
   const statusEl = $('key-status');
   if (!userApiKey || !keyStatus || keyStatus.fingerprint !== fingerprint(userApiKey)) statusEl.classList.add('hidden');
   else showKeyStatus(statusEl, keyStatus);
-  const model = Claude.MODELS[state.settings.writerModel || 'claude-haiku-5-5'];
+  const gem = Gemini.isGeminiKey(userApiKey);
+  $('model-field').classList.toggle('hidden', gem);
   $('engine-state').innerHTML = '';
   $('engine-state').append(
-    el('span', `engine-pill ${userApiKey ? 'ai' : 'free'}`, userApiKey ? `AI mode · Claude ${model}` : 'Free mode'),
-    el('span', 'muted', userApiKey ? ' Claude writes, Deep mode searches the web.' : ' Written on your device, no key needed.')
+    el('span', `engine-pill ${userApiKey ? 'ai' : 'free'}`, userApiKey ? `AI mode · ${aiLabel()}` : 'Free mode'),
+    el('span', 'muted', !userApiKey ? ' Written on your device, no key needed.'
+      : gem ? ' Gemini writes (free tier); Deep mode searches Google. Model picked automatically.'
+      : ' Claude writes, Deep mode searches the web.')
   );
 }
 
 function showKeyStatus(elm, ks) {
   elm.classList.remove('hidden');
   elm.dataset.status = ks.status;
-  elm.textContent = ks.status === 'valid' ? '✓ Key works. AI mode is on.'
+  elm.textContent = ks.status === 'valid' ? (ks.provider === 'gemini' ? `✓ Gemini key works. Using ${Gemini.label(ks.model)}.` : '✓ Key works. AI mode is on.')
     : ks.status === 'invalid' ? `✗ ${ks.reason || 'That key didn’t work.'}`
     : `⚠ ${ks.reason || 'Couldn’t check the key right now.'} Saved; it’ll be used on the next message.`;
 }
@@ -890,7 +901,7 @@ function renderModeChip() {
   let text, cls, title;
   if (!userApiKey) { text = 'Free mode'; cls = 'neutral'; title = 'Written on your device. Add an API key in Settings for AI mode.'; }
   else if (keyStatus?.status === 'invalid' && keyStatus.fingerprint === fingerprint(userApiKey)) { text = 'Key problem'; cls = 'bad'; title = keyStatus.reason || ''; }
-  else { text = `AI · ${Claude.MODELS[writerModel || 'claude-haiku-5-5']}`; cls = 'good'; title = 'Claude writes with your API key'; }
+  else { text = `AI · ${aiLabel()}`; cls = 'good'; title = Gemini.isGeminiKey(userApiKey) ? 'Gemini writes with your API key' : 'Claude writes with your API key'; }
   chip.textContent = text;
   chip.className = `status-chip ${cls}`;
   chip.title = title;

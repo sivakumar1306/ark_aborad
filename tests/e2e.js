@@ -28,6 +28,8 @@ function buildTestExtension() {
   fs.cpSync(EXT_SRC, dir, { recursive: true });
   const apiPath = path.join(dir, 'utils/api.js');
   fs.writeFileSync(apiPath, fs.readFileSync(apiPath, 'utf8').replace(/const API_URL = '[^']+'/, `const API_URL = '${MOCK}/v1/messages'`));
+  const gemPath = path.join(dir, 'utils/gemini.js');
+  fs.writeFileSync(gemPath, fs.readFileSync(gemPath, 'utf8').replace(/const API_BASE = '[^']+'/, `const API_BASE = '${MOCK}/v1beta'`));
   const mPath = path.join(dir, 'manifest.json');
   const m = JSON.parse(fs.readFileSync(mPath, 'utf8'));
   m.host_permissions.push(`${MOCK}/*`);
@@ -568,6 +570,47 @@ async function main() {
   const freeHooks = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
   check('free deep mode: profile hooks, no web calls', freeHooks.some(t => t.startsWith('Recently posted')) && (await getLog()).length === callsBefore, freeHooks);
   await panel3.click('#opt-mode [data-value="quick"]');
+
+  // ── 12b. Gemini (free-tier key) ──────────────────────────────────────────
+  console.log('\nGemini');
+  await panel3.click('#opt-mode [data-value="quick"]');
+  await panel3.click('#tab-settings');
+  await panel3.fill('#api-key', 'AIzaWRONG-key-zzzzzzzzzzzzzzzzzzzzzzzzzzz');
+  await panel3.click('#test-key-btn');
+  await panel3.waitForSelector('#key-status[data-status="invalid"]');
+  check('bad Gemini key explained', (await panel3.textContent('#key-status')).includes('Google rejected your Gemini API key'));
+  await panel3.fill('#api-key', 'AIzaTEST-valid-key-0123456789abcdefghijk');
+  await panel3.click('#test-key-btn');
+  await panel3.waitForSelector('#key-status[data-status="valid"]');
+  check('Gemini key works; newest stable Flash picked (not TTS/Lite/Pro)', (await panel3.textContent('#key-status')).includes('Gemini 2.5 Flash'), await panel3.textContent('#key-status'));
+  await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'AI · Gemini 2.5 Flash');
+  check('chip shows Gemini', true);
+  check('Claude model picker hidden for a Gemini key', await panel3.isHidden('#model-field'));
+  await panel3.click('#tab-compose');
+  let gb = await panel3.textContent('#step-note');
+  await panel3.click('#regen-btn');
+  await panel3.waitForFunction((b) => /Gemini 2\.5 Flash · free tier/.test(document.getElementById('step-note').textContent), gb, { timeout: 10000 });
+  const gw = (await getLog()).filter(e => /:generateContent/.test(e.path) && !(e.body.tools || []).length && !/single word/.test(JSON.stringify(e.body))).pop();
+  check('Gemini writer: same prompt (system rules + <context>)', /gemini-2\.5-flash:generateContent/.test(gw.path) && /Never invent/.test(gw.body.system_instruction.parts[0].text) && /<context>/.test(gw.body.contents[0].parts.slice(-1)[0].text));
+  const gmsg = await panel3.inputValue('#message');
+  check('Gemini "thought" parts are not in the message', gmsg.startsWith('Hi Priya') && !gmsg.includes('Let me think'), gmsg);
+  await panel3.click('#opt-mode [data-value="deep"]');
+  check('deep hint says Google search', (await panel3.textContent('#mode-hint')).includes('Gemini searches Google'));
+  // A profile with no earlier research, so Deep mode really searches.
+  await li.goto('https://www.linkedin.com/in/rahul-real-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Rahul Verma', null, { timeout: 8000 });
+  await panel3.click('#primary-btn');
+  await panel3.waitForFunction(() => document.querySelectorAll('#hooks-list .hook-src').length >= 2, null, { timeout: 15000 });
+  const gHooks = await panel3.$$eval('#hooks-list .hook > span', xs => xs.map(x => x.textContent));
+  const gr = (await getLog()).filter(e => (e.body.tools || []).some(t => t.google_search)).pop();
+  check('Gemini research uses Google Search grounding', !!gr);
+  check('only grounded sources kept (made-up domain dropped)', gHooks.some(t => t.includes('techcrunch.com')) && gHooks.some(t => t.includes('pydata.org')) && !gHooks.some(t => t.includes('Forbes')), gHooks);
+  await shot('21-gemini', panel3);
+  await panel3.click('#opt-mode [data-value="quick"]');
+  await panel3.click('#tab-settings');
+  await panel3.click('#remove-key');
+  await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'Free mode');
+  await panel3.click('#tab-compose');
 
   // ── 13. Dark mode screenshot ─────────────────────────────────────────────
   if (SHOTS) {

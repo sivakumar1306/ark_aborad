@@ -11,7 +11,7 @@ Target length about 9 minutes. Line numbers are for commit `f2ae881`. Say things
 3. Pick 2 profiles you've already tested: one **student**, and one **senior engineer / founder** with real posts.
 4. **Settings:**
    - **Import my LinkedIn**, so common ground works.
-   - Paste your Anthropic key and click **Test** (AI mode).
+   - Paste your API key and click **Test** (AI mode). A free Gemini key from aistudio.google.com works; so does an Anthropic key.
    - Purpose **Auto**, tone **Neutral**, format **Note**.
 5. On each profile, press **↻** on the profile card once, so the full read is done before recording.
 6. In Antigravity, open these files in tabs, in this order:
@@ -48,7 +48,7 @@ Pick three problems:
 1. **Open the panel.** Press **Alt+Shift+O** on a profile. *"It's a side panel now, so it stays open and follows me between profiles."*
 2. **Recipient chip.** *"It works out who this person is, here a student, from their title. Auto picks the right purpose."* Switch Purpose to **Job opportunity**: the warning appears. *"A student can't help with roles, so it suggests Networking. I stay in control."* Click **Switch to Networking**.
 3. **Common ground.** *"It read my profile and theirs: same school, matched even though one says 'IIT Bombay' and the other the full name."*
-4. **Generate** with **Ctrl+Enter**. Point at the summary line: *"Written in 2 seconds by Claude Haiku, under a tenth of a cent."*
+4. **Generate** with **Ctrl+Enter**. Point at the summary line: *"Written in 2 seconds by Gemini Flash on the free tier"* (or *"by Claude Haiku, under a tenth of a cent"* with an Anthropic key). *"Paste either kind of key; it detects which one."*
 5. **Fact check: the key moment.** *"Every sentence is checked against what was actually read."* Click a green sentence: the evidence card shows where it came from. Then type a false claim at the end, e.g. *"Congrats on your promotion to VP!"*. It turns amber instantly. *"No AI call; this runs on my machine."* Click **Fix with AI**. *"It tells Claude exactly which sentence wasn't supported, and the new version is checked again."*
 6. **Deep mode** on the second profile: *"Claude Sonnet searches the web. Every hook links its source, and a hook is kept only if its link actually came back from the search."* Untick a hook and rewrite: *"No new search; it reuses the results."*
 7. **Close and reopen.** Start a Deep run, close the panel, reopen it. *"It finished without me; I'll show why in the code."*
@@ -85,6 +85,7 @@ Open each file and point at the lines. Don't read the code; explain the idea.
 | 9 | `utils/grounding.js` | 143 `extractClaims`, 40 `EVENTS`, 251 `check` | "Fact check: pull out claims (names, numbers, event words like promotion or funding), then look each one up in what was read. Claims about *me* (line 267) are only checked against my own bio." |
 | 10 | `sidepanel.js` | 1140 `renderBackdrop` | "The highlights inside the message: an invisible copy of the text sits behind the transparent text box and gets painted, so you can still type." |
 | 11 | `utils/api.js` | 44 `create`, 91 `classify`, 120 `textOf` | "The Claude client: timeouts, retries on overload that respect retry-after, refusals and cut-off replies handled, and errors in plain English. Any failure offers 'Write in free mode'." |
+| 11b | `utils/gemini.js` | `pickModel`, `sourcesOf` | "Gemini as a second provider, since Claude needs a paid key. Google retires models often, so on Test I ask which models the key can use and pick the newest Flash. For research I keep only hooks whose domain Gemini actually grounded on." |
 | 12 | `utils/prompts.js` | 12 `WRITER_SYSTEM`, 109 `research`, 143 | "Context goes to Claude as JSON inside `<context>` tags, with a no-invented-facts rule. For research: web search on Sonnet, and line 143 drops any hook whose link didn't actually come back from the search." |
 | 13 | `utils/recipient.js` | 33 `RULES`, 76 `mismatch` | "Who is this person? Rules over their title and headline. The mismatch function produces the 'they're a student' warning." |
 | 14 | `utils/localwriter.js` | 109 `ASK_BY_TYPE` | "Free mode: the same purpose gets a different ask depending on who they are." |
@@ -141,6 +142,7 @@ Then:
 - **What are its false positives and negatives?** "It can miss a vague false claim ('your amazing growth') and can flag a harmless capitalised word. That's why it says 'check before sending'. I fixed every false alarm I found on real profiles and added a test for it."
 - **Why not let Claude fact-check itself?** "It's the same model that might have made the claim up. An independent, deterministic check is cheaper, instant and explainable. Next, I'd have Claude cite sources and compare the two."
 - **Why Haiku for writing and Sonnet for research?** "Haiku was upstream's choice and it's cheap. The web search tool version I use isn't listed for Haiku, so research runs on Sonnet."
+- **Why add Gemini?** "Claude needs a paid key; Gemini has a free tier, so anyone can try AI mode. Both providers share one prompt (`writerPrompt`) and the same checks, so the fact check doesn't depend on which model wrote the message."
 - **Why raw `fetch` instead of the SDK?** "The extension ships without a build step, as upstream does. The SDK would need a bundler. The client wraps what I'd otherwise get from the SDK: retries, errors, timeouts."
 - **How do you stop made-up sources?** "Research returns hooks with URLs; I keep a hook only if its URL appeared in the actual search results (`prompts.js` line 143)."
 - **How did you test without a key or real LinkedIn?** "A fake Claude API that returns the real response shapes (thinking blocks, web search results, `pause_turn`, overload errors), and fake LinkedIn pages built from real markup I saw while testing."

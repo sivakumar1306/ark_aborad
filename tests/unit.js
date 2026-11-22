@@ -12,6 +12,7 @@ global.Formats = require(ext('formats.js'));
 const LocalWriter = require(ext('localwriter.js'));
 global.Claude = require(ext('api.js'));
 const Recipient = require(ext('recipient.js'));
+global.Gemini = require(ext('gemini.js'));
 const Prompts = require(ext('prompts.js'));
 
 let passed = 0, failed = 0;
@@ -230,6 +231,29 @@ console.log('\nClaude client');
   check('research request: web_search_20260209 on Sonnet 5.5 with fallback', body.model === 'claude-sonnet-5-5' && body.tools[0].type === 'web_search_20260209' && body.fallbacks === 'default');
   const wb = Prompts.writerBody({ model: 'claude-haiku-5-5', profile: priya, hooks: [], common: [], sender: {}, purpose: 'Job', tone: 'Neutral', requirements: 'X', resumeBase64: 'AAAA' });
   check('writer request: resume as a PDF document block, no fallbacks on Haiku', wb.messages[0].content[0].type === 'document' && !('fallbacks' in wb));
+
+  console.log('\nGemini client');
+  check('key prefix picks the provider', Gemini.isGeminiKey('AIzaSyX') && !Gemini.isGeminiKey('sk-ant-x'));
+  check('model labels', Gemini.label('gemini-2.5-flash') === 'Gemini 2.5 Flash' && Gemini.label('gemini-3-flash') === 'Gemini 3 Flash');
+  global.fetch = async () => respond(200, { models: ['gemini-2.0-flash', 'gemini-3-flash', 'gemini-3-flash-preview-tts', 'gemini-3-pro', 'gemini-2.5-flash-lite'].map(n => ({ name: `models/${n}`, supportedGenerationMethods: ['generateContent'] })) });
+  check('picks the newest stable Flash', (await Gemini.pickModel('AIza')) === 'gemini-3-flash');
+  global.fetch = async () => respond(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } });
+  check('invalid key → auth', (await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }).catch(e => e)).code === 'auth');
+  let calls = 0;
+  global.fetch = async () => (++calls === 1 ? respond(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Resource has been exhausted (e.g. check quota).' } }) : respond(200, { candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }));
+  const t0 = Date.now();
+  await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }, { retries: 1 }).catch(() => {});
+  check('per-minute 429 is retried', calls === 2, calls);
+  global.fetch = async () => respond(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for requests per day.' } });
+  check('daily quota → clear message, not retried', /today’s free Gemini quota/.test((await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }).catch(e => e)).message));
+  check('thought parts dropped', Gemini.textOf({ candidates: [{ content: { parts: [{ text: 'thinking', thought: true }, { text: 'Hello' }] }, finishReason: 'STOP' }] }) === 'Hello');
+  let blocked = null;
+  try { Gemini.textOf({ candidates: [{ content: { parts: [] }, finishReason: 'SAFETY' }] }); } catch (e) { blocked = e; }
+  check('safety block → refusal', blocked?.code === 'refusal');
+  global.fetch = async () => respond(200, { candidates: [{ content: { parts: [{ text: '<hooks>[{"hook":"Real","url":"https://techcrunch.com/a"},{"hook":"Fake","url":"https://nowhere.example/x"}]</hooks>' }] }, finishReason: 'STOP',
+    groundingMetadata: { webSearchQueries: ['q'], groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/X', title: 'techcrunch.com' } }] } }] });
+  const gr = await Prompts.researchGemini('AIza', 'gemini-3-flash', priya);
+  check('Gemini research keeps only grounded sources', gr.hooks.length === 1 && gr.hooks[0].text === 'Real' && gr.searches === 1, gr.hooks);
 
   global.fetch = realFetch;
   console.log(`\n${passed} passed, ${failed} failed`);
