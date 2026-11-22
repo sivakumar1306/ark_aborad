@@ -58,6 +58,11 @@ const Gemini = (() => {
     if (/api key not valid|api_key_invalid|invalid api key/i.test(msg) || status === 401) {
       return new E('Google rejected your Gemini API key. Check it in Settings.', { code: 'auth', status });
     }
+    // Google can refuse free-tier use for a key's Cloud project (existing projects,
+    // work/school accounts, some regions). Say what to do instead of pasting the raw text.
+    if (/free tier is not available|billing to upgrade|project-unavailable|billing account/i.test(msg)) {
+      return new E('Google won’t allow free-tier Gemini for this key’s project. Create a key in a new project from a personal Google account at aistudio.google.com, or use free mode.', { code: 'billing', status });
+    }
     if (status === 403 || gStatus === 'PERMISSION_DENIED') {
       return new E(msg || 'This Gemini key isn’t allowed to use that model.', { code: 'permission', status });
     }

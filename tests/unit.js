@@ -248,6 +248,9 @@ console.log('\nClaude client');
   check('per-minute 429 is retried', calls === 2, calls);
   global.fetch = async () => respond(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for requests per day.' } });
   check('daily quota → clear message, not retried', /today’s free Gemini quota/.test((await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }).catch(e => e)).message));
+  global.fetch = async () => respond(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'The Gemini API free tier is not available for this project. To use the Gemini API, please set up billing to upgrade to the paid tier at https://aistudio.google.com/billing.' } });
+  const ft = await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }).catch(e => e);
+  check('"free tier not available" → short, actionable message', ft.code === 'billing' && /new project from a personal Google account/.test(ft.message), ft.message);
   check('thought parts dropped', Gemini.textOf({ candidates: [{ content: { parts: [{ text: 'thinking', thought: true }, { text: 'Hello' }] }, finishReason: 'STOP' }] }) === 'Hello');
   let blocked = null;
   try { Gemini.textOf({ candidates: [{ content: { parts: [] }, finishReason: 'SAFETY' }] }); } catch (e) { blocked = e; }
