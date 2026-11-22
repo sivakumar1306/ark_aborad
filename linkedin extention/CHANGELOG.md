@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.3.3
+
+- Posts with nothing to build on (“Congratulations! 🎉”, “Happy birthday!”, under 6 real words) are no longer used as recent posts or hooks.
+
 ## 4.3.2: Newer LinkedIn layout
 
 - Fixed: About came back empty on LinkedIn's newer profile layout, where the "… more" button sits inside the paragraph. The section text is now read directly (minus headings, buttons and screen-reader copies) when that's fuller.

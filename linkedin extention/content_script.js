@@ -195,7 +195,7 @@
         ? items.map(li => postTextOf(li, own))
         : visibleLines(act).filter(t => t.length > 40 && !isOwnLine(t, own));
       for (const t of sources) {
-        if (t && t.length >= 12 && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
+        if (t && hasSubstance(t) && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
           recentPosts.push(t.slice(0, 500));
         }
       }
@@ -249,6 +249,13 @@
       if (n === h || h.startsWith(n) || (n.length > 25 && n.startsWith(h.slice(0, 25)))) return true;
     }
     return /^\d+\s?(m|h|d|w|mo|yr|yrs)\b|•\s*(edited)?$|followers?$|^follow$|^\d+(st|nd|rd|th)\+?$/i.test(t);
+  }
+
+  // A post is only a useful hook if it says something: "Congratulations! 🎉" or
+  // "Happy birthday!" doesn't. Count real words, ignoring emoji and punctuation.
+  function hasSubstance(t) {
+    const words = String(t).replace(/[^\p{L}\p{N}\s'’-]/gu, ' ').split(/\s+/).filter(w => /\p{L}/u.test(w));
+    return words.length >= 6;
   }
 
   function postTextOf(item, own = {}) {
