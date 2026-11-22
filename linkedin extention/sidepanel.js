@@ -273,7 +273,7 @@ function renderRecipient(s) {
     $('rc-why').textContent = r.why ? `from ${r.why}` : '';
   }
   const p = prefs().purpose;
-  const first = (Sessions.effectiveProfile(s)?.name || '').split(' ')[0];
+  const first = Names.first(Sessions.effectiveProfile(s)?.name || '');
   $('purpose-hint').textContent = p === 'Auto' && r ? `Auto picks ${PURPOSE_NAMES[r.purpose]} for ${r.article}.` : '';
   $('purpose-hint').classList.toggle('hidden', !(p === 'Auto' && r));
   const warn = self ? null : Recipient.mismatch(r, p, first);
@@ -1377,8 +1377,7 @@ function el(tag, cls, text) {
 }
 
 function initials(name) {
-  const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
-  return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+  return Names.initials(name);
 }
 
 function avatarColor(name) {

@@ -10,7 +10,8 @@
 // hard limit, and rotates openers so "Write another version" gives a real alternative.
 
 const LocalWriter = (() => {
-  const first = (name) => String(name || '').trim().split(/\s+/)[0] || 'there';
+  // "Dr. Sheena Christabel Pravin" → "Sheena" (utils/names.js), never "Dr.".
+  const first = (name) => Names.first(name);
 
   function topic(post, max = 60) {
     let t = String(post || '').replace(/\s+/g, ' ').trim().replace(/^["“]|["”]$/g, '');
@@ -79,7 +80,7 @@ const LocalWriter = (() => {
     } else if (p.currentTitle && p.currentCompany) {
       list.push({ kind: 'role', short: `your work as ${p.currentTitle} at ${p.currentCompany} caught my eye.`, long: `Your work as ${p.currentTitle} at ${p.currentCompany} caught my eye.`, subject: `Quick question about ${p.currentCompany}` });
     } else if (p.headline) {
-      list.push({ kind: 'headline', short: `your focus on ${lower(topic(p.headline, 50))} caught my eye.`, long: `Your focus on ${lower(topic(p.headline, 70))} caught my eye.`, subject: 'Quick question' });
+      list.push({ kind: 'headline', short: `your work (${topic(p.headline, 50)}) caught my eye.`, long: `Your work (${topic(p.headline, 70)}) caught my eye.`, subject: 'Quick question' });
     }
     return list;
   }
@@ -119,9 +120,9 @@ const LocalWriter = (() => {
    */
   function write(ctx) {
     const p = ctx.profile || {};
-    const f = first(p.name);
-    const fmt = Formats.get(ctx.format, { noteLimit: ctx.noteLimit || 300 });
     const tone = GREET[ctx.tone] ? ctx.tone : 'Neutral';
+    const f = Names.greeting(p.name, tone); // formal + Dr./Prof. → "Dr. Pravin"
+    const fmt = Formats.get(ctx.format, { noteLimit: ctx.noteLimit || 300 });
     const ask = ASK_BY_TYPE[ctx.recipientType]?.[ctx.purpose] || ASKS[ctx.purpose] || ASKS.Networking;
     const fill = (s) => s.replace('{company}', p.currentCompany || 'your company');
     const ops = openers({ profile: p, common: ctx.common || [], hooks: ctx.hooks || [], recipientType: ctx.recipientType });

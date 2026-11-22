@@ -68,7 +68,7 @@ const CommonGround = (() => {
     if (!me || !them) return [];
     if (me.profileUrl && them.profileUrl && me.profileUrl === them.profileUrl) return [];
     const out = [];
-    const first = String(them.name || 'They').split(' ')[0];
+    const first = typeof Names !== 'undefined' ? Names.first(them.name) : String(them.name || 'They').split(' ')[0];
 
     if (me.currentCompany && them.currentCompany && sameOrg(me.currentCompany, them.currentCompany)) {
       out.push({ id: 'co-now', type: 'company', weight: 6, text: `You both work at ${them.currentCompany}` });

@@ -58,6 +58,7 @@ const Prompts = (() => {
       },
       purpose: ctx.purpose === 'Advice' ? 'Career advice' : ctx.purpose,
       recipient_type: ctx.recipientType || undefined,
+      address_them_as: typeof Names !== 'undefined' ? Names.greeting(ctx.profile?.name, ctx.tone) : undefined,
       tone: ctx.tone
     };
     const content = [];

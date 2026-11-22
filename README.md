@@ -156,7 +156,7 @@ linkedin extention/
 
 ## Tests
 
-- **`tests/unit.js`**: 73 checks.
+- **`tests/unit.js`**: 83 checks.
   - Fact check: true messages raise no false alarms; invented claims, sender claims and acronyms are handled.
   - Lint rules.
   - The free writer across 384 combinations: always within limits, no clichés, zero unverified claims.

@@ -11,7 +11,7 @@
 // There is no company server and no license key.
 
 importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/contacts.js', 'utils/common.js',
-  'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js');
+  'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js', 'utils/names.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
 const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
@@ -466,7 +466,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: `Follow up with ${c.name}?`,
-      message: `You messaged ${c.name.split(' ')[0]} ${days} day${days === 1 ? '' : 's'} ago and haven't marked a reply.`,
+      message: `You messaged ${Names.first(c.name)} ${days} day${days === 1 ? '' : 's'} ago and haven't marked a reply.`,
       priority: 1
     });
   }

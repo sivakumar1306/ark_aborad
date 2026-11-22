@@ -6,6 +6,7 @@ const path = require('path');
 const ext = (f) => path.join(__dirname, '..', 'linkedin extention', 'utils', f);
 const Grounding = require(ext('grounding.js'));
 const CommonGround = require(ext('common.js'));
+global.Names = require(ext('names.js'));
 const Lint = require(ext('lint.js'));
 global.Formats = require(ext('formats.js'));
 const LocalWriter = require(ext('localwriter.js'));
@@ -162,6 +163,24 @@ console.log('\nRecipient type');
   check('free writer: recruiter gets an openings ask', /openings at Google/.test(rec), rec);
   const req = Formats.brief({ format: 'note', recipient: stu });
   check('AI brief carries what they can help with', /appears to be a student/.test(req) && /cannot hire or refer/.test(req), req);
+}
+
+console.log('\nNames');
+{
+  const N = Names;
+  check('title stripped: Dr. Sheena Christabel Pravin → Sheena', N.first('Dr. Sheena Christabel Pravin') === 'Sheena');
+  check('formal greeting keeps the title: Dr. Pravin', N.greeting('Dr. Sheena Christabel Pravin', 'Formal') === 'Dr. Pravin' && N.greeting('Dr. Sheena Christabel Pravin', 'Neutral') === 'Sheena');
+  check('Prof. formal', N.greeting('Prof. Anil Kumar', 'Formal') === 'Prof. Kumar');
+  check('credentials and pronouns stripped', N.first('Rahul Verma, PhD') === 'Rahul' && N.first('Er. Anil Kumar (He/Him)') === 'Anil' && N.first('Meera Joshi 🚀') === 'Meera');
+  check('plain names unchanged', N.first('Priya Sharma') === 'Priya' && N.greeting('Priya Sharma', 'Formal') === 'Priya');
+  check('initials skip the title', N.initials('Dr. Sheena Christabel Pravin') === 'SP');
+  const sheena = { name: 'Dr. Sheena Christabel Pravin', currentTitle: 'CEO', currentCompany: 'MEDxAI INNOVATIONS Pvt. Ltd.' };
+  const formal = LocalWriter.write({ profile: sheena, sender: {}, purpose: 'Networking', tone: 'Formal', format: 'dm', recipientType: 'founder' });
+  const neutral = LocalWriter.write({ profile: sheena, sender: {}, purpose: 'Networking', tone: 'Neutral', format: 'note', noteLimit: 200, recipientType: 'founder' });
+  check('free writer: "Dear Dr. Pravin," not "Dear Dr.,"', formal.startsWith('Dear Dr. Pravin,'), formal.split('\n')[0]);
+  check('free writer: "Hi Sheena," in neutral tone', neutral.startsWith('Hi Sheena,'), neutral);
+  check('lint accepts both greetings', !Lint.check(formal, { format: 'dm', recipientName: sheena.name }).some(i => i.id === 'wrong-name') && !Lint.check(neutral, { format: 'note', recipientName: sheena.name }).some(i => i.id === 'wrong-name'));
+  check('lint still catches a wrong name', Lint.check('Dear Dr. Sharma, hi?', { format: 'dm', recipientName: sheena.name }).some(i => i.id === 'wrong-name'));
 }
 
 console.log('\nClaude client');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.4.2: Names with titles
+
+- Fixed: “Dear Dr.,”. Titles (Dr., Prof., Mr./Ms., Er., Shri/Smt., …), credentials (PhD, MBA…), pronouns and emoji are stripped from names (`utils/names.js`). Formal tone addresses doctors and professors as “Dear Dr. Pravin,”; other tones use the first name (“Hi Sheena,”).
+- The writing check accepts both forms and still flags a wrong name.
+- AI mode is told how to address the person (`address_them_as`).
+- The headline-only opener no longer lowercases titles (“assistant Director”).
+
 ## 4.4.1: Multi-role profiles and inner-panel scrolling
 
 - Current company is read from LinkedIn's profile header ("Current company: …"), so it's no longer empty for headlines like "Associate Professor, VIT and CEO, MEDxAI Pvt. Ltd.".
