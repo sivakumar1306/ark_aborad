@@ -2,20 +2,21 @@
 
 // sidepanel.js — the UI. A view over two stores:
 //   chrome.storage.session  "sess:<slug>"  per-profile work (owned by background.js)
-//   chrome.storage.local    settings, license, contacts
+//   chrome.storage.local    settings, optional API key, contacts
 // The panel never runs jobs itself. It sends intents to the background and
 // re-renders when storage changes, so it can close and reopen at any moment.
 
 const $  = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const SETTINGS_KEYS = ['licenseKey', 'userName', 'userBio', 'resumeFileName', 'license', 'prefs',
-  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded'];
+const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
+  'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Networking', tone: 'Neutral', format: 'note', mode: 'quick' };
 
 const state = {
   tab: null,
   key: null,
+  activeSentence: null,
   session: null,
   settings: {},
   contacts: [],
@@ -40,11 +41,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   renderSettingsForm();
   renderOptions();
-  renderQuota();
+  renderModeChip();
   renderTracker();
   await refreshTab();
   maybeOnboard();
-  maybeRevalidate();
 
   chrome.storage.onChanged.addListener(onStorageChanged);
   if (!state.pinnedTabId) {
@@ -53,8 +53,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   chrome.tabs.onUpdated.addListener((tabId, info) => {
     if (!state.tab || tabId !== state.tab.id) return;
+    // Always re-check on load complete: the URL event may have been handled while
+    // the tab was still loading (when we skip reading).
     if (info.url) refreshTab({ navigated: true });
-    else if (info.status === 'complete' && state.key && !state.session?.profile) refreshTab();
+    else if (info.status === 'complete') refreshTab();
   });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 });
@@ -94,8 +96,10 @@ function onStorageChanged(changes, area) {
   }
   if (touched) {
     if (changes.theme) applyTheme();
-    if (changes.license || changes.licenseKey) { renderQuota(); renderKeyStatus(); }
-    if (changes.licenseKey) revalidateSoon();
+    if (changes.keyStatus || changes.userApiKey || changes.writerModel) { renderModeChip(); renderKeyStatus(); renderOptions(); }
+    if (changes.userApiKey) testSoon();
+    if (changes.myProfile) renderMe();
+    if (changes.userName || changes.userBio) syncAboutFields();
     renderCompose();
   }
 }
@@ -129,7 +133,7 @@ async function refreshTab({ navigated = false } = {}) {
 function wireTabs() {
   $$('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   $$('[data-goto]').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.goto)));
-  $('quota-chip').addEventListener('click', () => switchTab('settings'));
+  $('mode-chip').addEventListener('click', () => switchTab('settings'));
 }
 
 function switchTab(name) {
@@ -208,6 +212,7 @@ function wireCompose() {
   $('regen-btn').addEventListener('click', () => onPrimary({ another: true }));
   $('shorten-btn').addEventListener('click', () => onPrimary({ another: true, shorten: true }));
   $('error-action').addEventListener('click', onErrorAction);
+  $('error-free').addEventListener('click', writeLocally);
 
   $('fit-btn').addEventListener('click', () => {
     const v = activeVersion();
@@ -218,9 +223,21 @@ function wireCompose() {
   });
 
   $('message').addEventListener('input', () => {
+    hideEvidence(); // offsets shift while typing; the check re-runs below
     renderMeter();
+    autoGrow();
+    renderCheckSoon();
     saveMessageEdit();
   });
+
+  $('message').addEventListener('scroll', () => { $('msg-backdrop').scrollTop = $('message').scrollTop; });
+  $('message').addEventListener('click', showEvidenceAtCaret);
+  $('message').addEventListener('keyup', (e) => { if (/^(Arrow|Home|End|Page)/.test(e.key)) showEvidenceAtCaret(); });
+  $('ev-close').addEventListener('click', hideEvidence);
+  $('check-toggle').addEventListener('click', () => toggleCheck());
+  $('fix-ai-btn').addEventListener('click', fixWithAI);
+  $('nudge-import').addEventListener('click', () => importMe($('nudge-import')));
+  $('nudge-dismiss').addEventListener('click', () => chrome.storage.local.set({ groundNudgeDismissed: true }));
 
   $('v-prev').addEventListener('click', () => stepVersion(-1));
   $('v-next').addEventListener('click', () => stepVersion(1));
@@ -231,17 +248,11 @@ function wireCompose() {
 
 function currentOptions(extra = {}) {
   const p = prefs();
-  return { purpose: p.purpose, tone: p.tone, format: p.format, mode: p.mode, ...extra };
+  return { purpose: p.purpose, tone: p.tone, format: p.format, mode: p.mode, commonGround: selectedCommon().map(c => c.text), ...extra };
 }
 
 async function onPrimary({ another = false, shorten = false } = {}) {
   if (!state.key || !state.tab) return;
-  if (!state.settings.licenseKey) {
-    toast('Add your license key first.', { type: 'error' });
-    switchTab('settings');
-    $('license-key').focus();
-    return;
-  }
   const s = state.session;
   if (Sessions.isBusy(s)) return;
 
@@ -256,10 +267,23 @@ async function onPrimary({ another = false, shorten = false } = {}) {
   if (!r.ok) toast(r.error, { type: 'error' });
 }
 
+const KEY_ERRORS = ['auth', 'billing', 'permission', 'model', 'no_key'];
 function onErrorAction() {
   const code = state.session?.errorCode;
-  if (code === 'auth' || code === 'no_key') { switchTab('settings'); $('license-key').focus(); return; }
+  if (KEY_ERRORS.includes(code)) { switchTab('settings'); $('api-key').focus(); return; }
   onPrimary();
+}
+
+// When Claude can't be used (bad key, no credit, outage), write this one for free instead.
+async function writeLocally() {
+  if (!state.key || !state.tab) return;
+  const p = prefs();
+  const s = state.session;
+  const options = currentOptions({ forceLocal: true });
+  const r = s?.profile?.full && !(p.mode === 'deep' && !s.research)
+    ? await send({ type: 'WRITE', key: state.key, tabId: state.tab.id, options })
+    : await send({ type: 'GENERATE', key: state.key, tabId: state.tab.id, mode: p.mode, options });
+  if (!r.ok) toast(r.error, { type: 'error' });
 }
 
 function patchSession(patch) {
@@ -277,11 +301,14 @@ function renderOptions() {
   setSegmented('opt-mode', p.mode);
   const f = Formats.get(p.format, { noteLimit: noteLimit() });
   $('format-hint').textContent = f.desc;
+  $('mode-hint').textContent = p.mode === 'deep'
+    ? (hasAI() ? 'Deep: Claude searches the web for recent news and public work, with a link for every hook (about $0.02 to $0.05).'
+               : 'Deep: picks hooks from their profile. Add an API key in Settings for web research.')
+    : '';
+  $('mode-hint').classList.toggle('hidden', p.mode !== 'deep');
 }
 
 function renderCompose() {
-  const hasKey = !!state.settings.licenseKey;
-  $('no-key-banner').classList.toggle('hidden', hasKey || !state.settings.onboarded);
   const onProfile = !!state.key;
   $('no-profile').classList.toggle('hidden', onProfile);
   $('compose').classList.toggle('hidden', !onProfile);
@@ -289,6 +316,7 @@ function renderCompose() {
 
   const s = state.session || Sessions.blank(state.key);
   renderProfile(s);
+  renderGround(s);
   renderSteps(s);
   renderHooks(s);
   renderError(s);
@@ -321,7 +349,7 @@ function renderProfile(s) {
   const found = [
     p.currentTitle && 'role',
     p.about && 'about',
-    p.experienceEntries?.length && `${p.experienceEntries.length} roles`,
+    p.experienceEntries?.length && `${p.experienceEntries.length} role${p.experienceEntries.length > 1 ? 's' : ''}`,
     p.recentPosts?.length && `${p.recentPosts.length} post${p.recentPosts.length > 1 ? 's' : ''}`,
     p.skills?.length && `${p.skills.length} skills`
   ].filter(Boolean);
@@ -344,7 +372,8 @@ function renderProfile(s) {
 }
 
 function renderSteps(s) {
-  const show = s.stage !== 'idle' || s.versions.length;
+  // Steps matter while work is happening; afterwards one summary line is enough.
+  const show = Sessions.isBusy(s) || s.stage === 'error';
   $('stepper').classList.toggle('hidden', !show);
   for (const li of $$('#stepper .step')) {
     const st = s.steps?.[li.dataset.step] || 'idle';
@@ -376,6 +405,12 @@ function renderHooks(s) {
     });
     const span = document.createElement('span');
     span.textContent = h.text;
+    if (h.url) {
+      const a = el('a', 'hook-src', hostOf(h.url) + (h.date ? ` · ${h.date}` : ''));
+      a.href = h.url; a.target = '_blank'; a.rel = 'noopener';
+      a.title = h.title || h.url;
+      span.append(' ', a);
+    }
     label.append(cb, span);
     list.appendChild(label);
   });
@@ -386,7 +421,8 @@ function renderError(s) {
   $('error-banner').classList.toggle('hidden', !show);
   if (!show) return;
   $('error-text').textContent = s.error;
-  $('error-action').textContent = (s.errorCode === 'auth' || s.errorCode === 'no_key') ? 'Open Settings' : 'Try again';
+  $('error-action').textContent = KEY_ERRORS.includes(s.errorCode) ? 'Open Settings' : 'Try again';
+  $('error-free').classList.toggle('hidden', !hasAI() || s.errorCode === 'no_profile');
 }
 
 function renderPrimary(s) {
@@ -431,6 +467,7 @@ function renderResult(s) {
 
   const ta = $('message');
   const isNew = state.renderedVersionId && state.renderedVersionId !== v.id && s.active === s.versions.length - 1;
+  if (state.renderedVersionId !== v.id) state.activeSentence = null;
   if (state.renderedVersionId !== v.id || document.activeElement !== ta) {
     if (ta.value !== v.text) ta.value = v.text;
     state.renderedVersionId = v.id;
@@ -446,6 +483,8 @@ function renderResult(s) {
   $('v-prev').disabled = s.active <= 0;
   $('v-next').disabled = s.active >= s.versions.length - 1;
   renderMeter();
+  autoGrow();
+  renderCheck();
   renderSentRow();
 }
 
@@ -587,6 +626,7 @@ function filteredContacts() {
 }
 
 function renderTracker() {
+  renderInsights();
   const due = state.contacts.filter(c => ContactStore.isDue(c)).length;
   $('due-badge').textContent = due;
   $('due-badge').classList.toggle('hidden', !due);
@@ -672,13 +712,20 @@ function exportCSV() {
 function wireSettings() {
   const flash = savedFlash();
 
-  $('license-key').addEventListener('input', debounce(async (e) => {
-    const licenseKey = e.target.value.trim().toUpperCase();
-    await chrome.storage.local.set({ licenseKey });
+  $('api-key').addEventListener('input', debounce(async (e) => {
+    const userApiKey = e.target.value.trim();
+    await chrome.storage.local.set({ userApiKey });
     flash();
   }, 400));
-  $('license-key').addEventListener('keydown', e => { if (e.key === 'Enter') verifyKey($('license-key'), $('validate-btn')); });
-  $('validate-btn').addEventListener('click', () => verifyKey($('license-key'), $('validate-btn')));
+  $('api-key').addEventListener('keydown', e => { if (e.key === 'Enter') testKey($('api-key'), $('test-key-btn'), $('key-status')); });
+  $('test-key-btn').addEventListener('click', () => testKey($('api-key'), $('test-key-btn'), $('key-status')));
+  $('key-show').addEventListener('click', () => { const i = $('api-key'); i.type = i.type === 'password' ? 'text' : 'password'; });
+  $('remove-key').addEventListener('click', async () => {
+    await chrome.storage.local.remove(['userApiKey', 'keyStatus']);
+    $('api-key').value = '';
+    toast('Key removed. Back to free mode.');
+  });
+  $('set-model').addEventListener('change', async e => { await chrome.storage.local.set({ writerModel: e.target.value }); flash(); });
 
   $('user-name').addEventListener('input', debounce(async e => { await chrome.storage.local.set({ userName: e.target.value.trim() }); flash(); }, 400));
   $('user-bio').addEventListener('input', e => { renderBioCount(); bioSave(e.target.value); });
@@ -697,6 +744,10 @@ function wireSettings() {
     renderResume();
   });
 
+  $('import-me').addEventListener('click', () => importMe($('import-me')));
+  $('reimport-me').addEventListener('click', () => importMe($('reimport-me')));
+  $('remove-me').addEventListener('click', () => chrome.storage.local.remove('myProfile'));
+
   wireSegmented('set-note-limit', async v => { await chrome.storage.local.set({ noteLimit: Number(v) }); setSegmented('set-note-limit', v); renderOptions(); flash(); });
   wireSegmented('set-theme', async v => { await chrome.storage.local.set({ theme: v }); setSegmented('set-theme', v); flash(); });
   $('set-followup').addEventListener('change', async e => { await chrome.storage.local.set({ followUpDays: Number(e.target.value) }); flash(); });
@@ -705,7 +756,8 @@ function wireSettings() {
 
 function renderSettingsForm() {
   const s = state.settings;
-  $('license-key').value = s.licenseKey || '';
+  $('api-key').value = s.userApiKey || '';
+  $('set-model').value = s.writerModel || 'claude-haiku-5-5';
   $('user-name').value = s.userName || '';
   $('user-bio').value = s.userBio || '';
   renderBioCount();
@@ -715,6 +767,15 @@ function renderSettingsForm() {
   $('set-fab').checked = s.showFab !== false;
   renderResume();
   renderKeyStatus();
+  renderMe();
+}
+
+function syncAboutFields() {
+  const s = state.settings;
+  if (document.activeElement !== $('user-name')) $('user-name').value = s.userName || '';
+  if (document.activeElement !== $('user-bio')) { $('user-bio').value = s.userBio || ''; renderBioCount(); }
+  if (document.activeElement !== $('ob-name')) $('ob-name').value = s.userName || '';
+  if (document.activeElement !== $('ob-bio')) $('ob-bio').value = s.userBio || '';
 }
 
 function renderBioCount() {
@@ -745,90 +806,92 @@ function saveResume(file) {
   reader.readAsDataURL(file);
 }
 
-async function verifyKey(input, btn, statusEl = $('key-status')) {
-  const key = input.value.trim().toUpperCase();
+// ─── API key (optional) ───────────────────────────────────────────────────────
+function fingerprint(key) {
+  return key ? `${key.slice(0, 7)}…${key.slice(-4)}` : '';
+}
+
+function hasAI() { return !!state.settings.userApiKey; }
+
+async function testKey(input, btn, statusEl) {
+  const key = input.value.trim();
   if (!key) { input.focus(); return null; }
-  input.value = key;
   btn.disabled = true;
   const prev = btn.textContent;
-  btn.textContent = 'Checking…';
-  const r = await send({ type: 'VALIDATE_KEY', key });
+  btn.textContent = 'Testing…';
+  const r = await send({ type: 'TEST_KEY', key });
   btn.disabled = false;
   btn.textContent = prev;
-  const lic = r.license || { status: 'unknown', reason: r.error };
-  if (lic.status === 'unknown') await chrome.storage.local.set({ licenseKey: key }); // offline: keep it, verify later
-  showKeyStatus(statusEl, lic);
-  return lic;
+  const ks = r.keyStatus || { status: 'unknown', reason: r.error };
+  showKeyStatus(statusEl, ks);
+  return ks;
 }
 
 function renderKeyStatus() {
-  const s = state.settings;
-  const lic = s.license;
-  if (!s.licenseKey || !lic || lic.key !== s.licenseKey) { $('key-status').classList.add('hidden'); return; }
-  showKeyStatus($('key-status'), lic);
+  const { userApiKey, keyStatus } = state.settings;
+  $('remove-key').classList.toggle('hidden', !userApiKey);
+  const statusEl = $('key-status');
+  if (!userApiKey || !keyStatus || keyStatus.fingerprint !== fingerprint(userApiKey)) statusEl.classList.add('hidden');
+  else showKeyStatus(statusEl, keyStatus);
+  const model = Claude.MODELS[state.settings.writerModel || 'claude-haiku-5-5'];
+  $('engine-state').innerHTML = '';
+  $('engine-state').append(
+    el('span', `engine-pill ${userApiKey ? 'ai' : 'free'}`, userApiKey ? `AI mode · Claude ${model}` : 'Free mode'),
+    el('span', 'muted', userApiKey ? ' Claude writes, Deep mode searches the web.' : ' Written on your device, no key needed.')
+  );
 }
 
-function showKeyStatus(elm, lic) {
+function showKeyStatus(elm, ks) {
   elm.classList.remove('hidden');
-  elm.dataset.status = lic.status;
-  elm.textContent = lic.status === 'valid'
-    ? `✓ Valid key${typeof lic.remaining === 'number' ? ` · ${lic.remaining} messages left today` : ''}`
-    : lic.status === 'invalid' ? `✗ ${lic.reason || 'Invalid key'}` : `⚠ ${lic.reason || 'Couldn’t verify right now.'} Saved; we’ll retry.`;
+  elm.dataset.status = ks.status;
+  elm.textContent = ks.status === 'valid' ? '✓ Key works. AI mode is on.'
+    : ks.status === 'invalid' ? `✗ ${ks.reason || 'That key didn’t work.'}`
+    : `⚠ ${ks.reason || 'Couldn’t check the key right now.'} Saved; it’ll be used on the next message.`;
 }
 
-function maybeRevalidate() {
-  const { licenseKey, license } = state.settings;
-  if (!licenseKey) return;
-  const stale = !license || license.key !== licenseKey || Date.now() - (license.checkedAt || 0) > 6 * 3600e3;
-  if (stale && license?.status !== 'invalid') send({ type: 'VALIDATE_KEY', key: licenseKey });
-}
-
-// A changed key gets checked once the user stops typing.
-const revalidateSoon = debounce(() => {
-  const { licenseKey, license } = state.settings;
-  if (licenseKey && licenseKey.length >= 10 && license?.key !== licenseKey) send({ type: 'VALIDATE_KEY', key: licenseKey });
-}, 1200);
-
-function renderQuota() {
-  const chip = $('quota-chip');
-  const { licenseKey, license } = state.settings;
+function renderModeChip() {
+  const chip = $('mode-chip');
+  const { userApiKey, keyStatus, writerModel } = state.settings;
   let text, cls, title;
-  if (!licenseKey) { text = 'No key'; cls = 'bad'; title = 'Add your license key in Settings'; }
-  else if (!license || license.key !== licenseKey || license.status === 'unknown') { text = 'Key saved'; cls = 'neutral'; title = 'Not verified yet'; }
-  else if (license.status === 'invalid') { text = 'Key invalid'; cls = 'bad'; title = license.reason || ''; }
-  else if (typeof license.remaining === 'number') {
-    text = license.remaining > 0 ? `${license.remaining} left today` : 'Limit reached';
-    cls = license.remaining > 3 ? 'good' : license.remaining > 0 ? 'warn' : 'bad';
-    title = 'Messages remaining today on your license';
-  } else { text = 'Active'; cls = 'good'; title = 'License verified'; }
+  if (!userApiKey) { text = 'Free mode'; cls = 'neutral'; title = 'Written on your device. Add an API key in Settings for AI mode.'; }
+  else if (keyStatus?.status === 'invalid' && keyStatus.fingerprint === fingerprint(userApiKey)) { text = 'Key problem'; cls = 'bad'; title = keyStatus.reason || ''; }
+  else { text = `AI · ${Claude.MODELS[writerModel || 'claude-haiku-5-5']}`; cls = 'good'; title = 'Claude writes with your API key'; }
   chip.textContent = text;
-  chip.className = `quota-chip ${cls}`;
+  chip.className = `status-chip ${cls}`;
   chip.title = title;
 }
 
+// A pasted key gets tested once the user stops typing.
+const testSoon = debounce(() => {
+  const { userApiKey, keyStatus } = state.settings;
+  if (userApiKey && userApiKey.length > 30 && keyStatus?.fingerprint !== fingerprint(userApiKey)) testKey($('api-key'), $('test-key-btn'), $('key-status'));
+}, 1200);
+
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 function maybeOnboard() {
-  if (state.settings.onboarded || state.settings.licenseKey) return;
+  if (state.settings.onboarded) return;
   $('onboarding').classList.remove('hidden');
-  setTimeout(() => $('ob-key').focus(), 50);
+  setTimeout(() => $('ob-free').focus(), 50);
 }
 
 function obStep(n) {
   $$('.ob-step').forEach(s => s.classList.toggle('hidden', s.dataset.ob !== String(n)));
   $$('.ob-dots span').forEach((d, i) => d.classList.toggle('active', i < n));
-  const focusable = { 1: 'ob-key', 2: 'ob-name', 3: 'ob-done' }[n];
+  const focusable = { 1: 'ob-free', 2: 'ob-name', 3: 'ob-done' }[n];
   setTimeout(() => $(focusable)?.focus(), 30);
 }
 
 function wireOnboarding() {
-  const verify = async () => {
-    const lic = await verifyKey($('ob-key'), $('ob-verify'), $('ob-key-status'));
-    if (lic && lic.status !== 'invalid') setTimeout(() => obStep(2), lic.status === 'valid' ? 700 : 1400);
+  const test = async () => {
+    const ks = await testKey($('ob-key'), $('ob-test'), $('ob-key-status'));
+    if (ks && ks.status !== 'invalid') setTimeout(() => obStep(2), ks.status === 'valid' ? 700 : 1400);
   };
-  $('ob-verify').addEventListener('click', verify);
-  $('ob-key').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
+  $('ob-test').addEventListener('click', test);
+  $('ob-key').addEventListener('keydown', e => { if (e.key === 'Enter') test(); });
+  $('ob-free').addEventListener('click', () => obStep(2));
   $('ob-name').value = state.settings.userName || '';
   $('ob-bio').value = state.settings.userBio || '';
+  $('ob-import').addEventListener('click', () => importMe($('ob-import')));
   $('ob-next').addEventListener('click', async () => {
     await chrome.storage.local.set({ userName: $('ob-name').value.trim(), userBio: $('ob-bio').value.trim() });
     obStep(3);
@@ -842,6 +905,384 @@ function wireOnboarding() {
   };
   $('ob-done').addEventListener('click', finish);
   $('ob-skip').addEventListener('click', finish);
+}
+
+// ─── Common ground ────────────────────────────────────────────────────────────
+function isSelf() {
+  const me = state.settings.myProfile;
+  return !!(me && state.key && Sessions.keyFromUrl(me.profileUrl) === state.key);
+}
+
+function commonFor(s) {
+  const me = state.settings.myProfile;
+  const them = Sessions.effectiveProfile(s);
+  if (!me || !them || isSelf()) return [];
+  return CommonGround.find(me, them);
+}
+
+function selectedCommon() {
+  const s = state.session;
+  if (!s) return [];
+  const picks = s.commonPicks || {};
+  return commonFor(s).filter((c, i) => (c.id in picks ? picks[c.id] : i < 2));
+}
+
+function renderGround(s) {
+  const self = isSelf();
+  $('self-banner').classList.toggle('hidden', !self);
+  const hasMe = !!state.settings.myProfile;
+  $('ground-nudge').classList.toggle('hidden', hasMe || !s.profile || !!state.settings.groundNudgeDismissed || !state.settings.onboarded);
+
+  const items = commonFor(s);
+  $('ground').classList.toggle('hidden', !items.length);
+  const list = $('ground-list');
+  list.innerHTML = '';
+  const chosen = new Set(selectedCommon().map(c => c.id));
+  for (const c of items) {
+    const label = el('label', 'hook');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = chosen.has(c.id);
+    cb.disabled = Sessions.isBusy(s);
+    cb.addEventListener('change', () => {
+      const picks = { ...(state.session?.commonPicks || {}) };
+      items.forEach((x, i) => { if (!(x.id in picks)) picks[x.id] = i < 2; });
+      picks[c.id] = cb.checked;
+      patchSession({ commonPicks: picks });
+    });
+    const span = el('span', '', c.text);
+    if (c.detail) span.appendChild(el('span', 'muted', ` · ${c.detail}`));
+    label.append(cb, span);
+    list.appendChild(label);
+  }
+}
+
+async function importMe(btn) {
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Reading your profile…';
+  const r = await send({ type: 'IMPORT_ME', returnTabId: state.tab?.id });
+  btn.disabled = false;
+  btn.textContent = prev;
+  if (!r.ok) { toast(r.error, { type: 'error', ms: 5000 }); return; }
+  const filled = [r.filledName && 'name', r.filledBio && 'bio'].filter(Boolean);
+  toast(`Imported ${r.profile.name}.${filled.length ? ` Filled in your ${filled.join(' and ')}.` : ''}`);
+  syncAboutFields();
+}
+
+function renderMe() {
+  const me = state.settings.myProfile;
+  $('me-empty').classList.toggle('hidden', !!me);
+  $('me-card').classList.toggle('hidden', !me);
+  if (!me) return;
+  $('me-avatar').textContent = initials(me.name);
+  $('me-avatar').style.background = avatarColor(me.name);
+  $('me-name').textContent = me.name;
+  const bits = [
+    me.educationEntries?.length && `${me.educationEntries.length} school${me.educationEntries.length > 1 ? 's' : ''}`,
+    me.experienceEntries?.length && `${me.experienceEntries.length} role${me.experienceEntries.length > 1 ? 's' : ''}`,
+    me.skills?.length && `${me.skills.length} skills`
+  ].filter(Boolean);
+  $('me-meta').textContent = `${bits.join(' · ')} · imported ${relTime(me.importedAt)}`;
+}
+
+// ─── Before-you-send check: fact check + writing lint ─────────────────────────
+let lastCheck = null;
+const renderCheckSoon = debounce(() => renderCheck(), 150);
+
+function runCheck() {
+  const s = state.session;
+  const v = activeVersion();
+  if (!s || !v) return null;
+  const text = $('message').value;
+  const profile = Sessions.effectiveProfile(s);
+  const grounding = Grounding.check(text, {
+    profile,
+    hooks: s.hooks || [],
+    common: commonFor(s),
+    userBio: state.settings.userBio,
+    userName: state.settings.userName,
+    myProfile: state.settings.myProfile
+  });
+  const lint = Lint.check(text, { format: v.format, recipientName: profile?.name, grounding, userName: state.settings.userName });
+  return { text, grounding, lint, versionId: v.id };
+}
+
+function renderCheck() {
+  const c = runCheck();
+  lastCheck = c;
+  if (!c) return;
+  const { grounding: g, lint } = c;
+  const errors = lint.filter(i => i.level === 'error').length;
+  const warns = lint.filter(i => i.level === 'warn' && !i.hidden).length + g.unverified;
+  const tips = lint.filter(i => i.level === 'tip').length;
+  const factual = g.backed + g.unverified;
+
+  // Header summary.
+  const badge = $('check-badge');
+  const level = errors ? 'error' : warns ? 'warn' : 'ok';
+  badge.dataset.level = level;
+  badge.textContent = errors ? '✕' : warns ? '!' : '✓';
+  const parts = [];
+  if (factual) parts.push(g.unverified ? `${g.backed}/${factual} claims backed` : factual === 1 ? '1 claim backed' : `All ${factual} claims backed`);
+  else parts.push('No factual claims');
+  const issueCount = errors + lint.filter(i => i.level === 'warn' && !i.hidden).length + tips;
+  if (issueCount) parts.push(`${issueCount} writing note${issueCount > 1 ? 's' : ''}`);
+  $('check-summary').textContent = parts.join(' · ');
+  $('check').dataset.level = level;
+
+  // Auto-open when something needs attention (once per version).
+  if ((errors || g.unverified) && state.checkOpenedFor !== c.versionId) {
+    state.checkOpenedFor = c.versionId;
+    toggleCheck(true);
+  }
+
+  // Facts list: unverified first, then backed.
+  const facts = $('facts-list');
+  facts.innerHTML = '';
+  const factual_s = g.sentences.filter(x => x.status !== 'neutral').sort((a, b) => (a.status === 'unverified' ? -1 : 0) - (b.status === 'unverified' ? -1 : 0));
+  for (const sen of factual_s) {
+    const li = el('li', `check-item ${sen.status === 'unverified' ? 'warn' : 'ok'}`);
+    li.tabIndex = 0;
+    li.appendChild(el('span', 'ci-icon', sen.status === 'unverified' ? '!' : '✓'));
+    const body = el('div', 'ci-body');
+    body.appendChild(el('div', 'ci-title', `“${sen.text.length > 90 ? sen.text.slice(0, 88) + '…' : sen.text}”`));
+    if (sen.status === 'unverified') {
+      const missing = sen.missing.map(m => m.display || m.value);
+      const where = sen.aboutSender ? 'your bio or profile' : 'their profile or the research';
+      body.appendChild(el('div', 'ci-detail', `Couldn’t find ${listOf(missing.map(x => `“${x}”`))} in ${where}. Check before sending.`));
+    } else {
+      const src = sen.claims.find(cl => cl.source)?.source;
+      if (src) body.appendChild(el('div', 'ci-detail', `${src.label}: ${src.snippet}`));
+    }
+    li.appendChild(body);
+    li.addEventListener('click', () => { selectRange(sen.start, sen.end); openEvidence(sen); });
+    facts.appendChild(li);
+  }
+  $('facts-section').classList.toggle('hidden', !factual_s.length);
+
+  const lintList = $('lint-list');
+  lintList.innerHTML = '';
+  for (const i of lint.filter(x => !x.hidden)) {
+    const li = el('li', `check-item ${i.level === 'error' ? 'error' : i.level === 'warn' ? 'warn' : 'tip'}`);
+    li.appendChild(el('span', 'ci-icon', i.level === 'error' ? '✕' : i.level === 'warn' ? '!' : '•'));
+    const body = el('div', 'ci-body');
+    body.append(el('div', 'ci-title', i.title), el('div', 'ci-detail', i.detail));
+    li.appendChild(body);
+    if (i.match) {
+      li.tabIndex = 0;
+      li.addEventListener('click', () => {
+        const at = c.text.indexOf(i.match);
+        if (at >= 0) selectRange(at, at + i.match.length);
+      });
+    }
+    lintList.appendChild(li);
+  }
+  $('lint-section').classList.toggle('hidden', !lint.filter(x => !x.hidden).length);
+
+  const fixable = g.unverified || errors || lint.some(i => i.level === 'warn' && !i.hidden) || lint.some(i => i.id === 'no-ask' || i.id === 'me-me-me');
+  $('fix-ai-btn').disabled = !fixable || !hasAI() || Sessions.isBusy(state.session);
+  $('fix-ai-btn').title = hasAI() ? 'Rewrite with these fixes' : 'Add an Anthropic API key in Settings to fix with AI';
+
+  // Keep an open evidence card pointing at a sentence that still exists.
+  if (state.activeSentence !== null && state.activeSentence !== undefined) {
+    const still = g.sentences.find(x => x.start === state.activeSentence && x.status !== 'neutral');
+    if (still) openEvidence(still); else hideEvidence();
+  }
+  updateEvidenceHint();
+  renderBackdrop(c);
+}
+
+function toggleCheck(force) {
+  const body = $('check-body');
+  const open = force !== undefined ? force : body.classList.contains('hidden');
+  body.classList.toggle('hidden', !open);
+  $('check-toggle').setAttribute('aria-expanded', String(open));
+  $('check').classList.toggle('open', open);
+}
+
+// Inline highlights: a mirror div behind the transparent textarea.
+function renderBackdrop(c) {
+  const bd = $('msg-backdrop');
+  const text = c.text;
+  let html = '';
+  let pos = 0;
+  for (const sen of c.grounding.sentences) {
+    if (sen.status === 'neutral') continue;
+    html += escapeHtml(text.slice(pos, sen.start));
+    let inner = escapeHtml(text.slice(sen.start, sen.end));
+    if (sen.status === 'unverified') {
+      for (const m of sen.missing) {
+        const term = escapeHtml(m.display || m.value);
+        const i = inner.indexOf(term);
+        if (i >= 0) inner = inner.slice(0, i) + `<mark class="miss">${term}</mark>` + inner.slice(i + term.length);
+      }
+    }
+    const active = sen.start === state.activeSentence ? ' active' : '';
+    html += `<span class="hl ${sen.status}${active}">${inner}</span>`;
+    pos = sen.end;
+  }
+  html += escapeHtml(text.slice(pos)) + '\n';
+  bd.innerHTML = html;
+  bd.scrollTop = $('message').scrollTop;
+}
+
+function autoGrow() {
+  const ta = $('message');
+  ta.style.height = 'auto';
+  ta.style.height = Math.max(96, ta.scrollHeight + 2) + 'px';
+}
+
+function selectRange(start, end) {
+  const ta = $('message');
+  ta.focus();
+  ta.setSelectionRange(start, end);
+}
+
+async function fixWithAI() {
+  const c = lastCheck || runCheck();
+  const v = activeVersion();
+  if (!c || !v || !state.key) return;
+  const revise = {
+    unverified: c.grounding.sentences.filter(x => x.status === 'unverified').map(x => x.text),
+    cliches: c.lint.filter(i => i.id.startsWith('cliche:')).map(i => `“${i.match}”`),
+    other: c.lint.filter(i => !i.id.startsWith('cliche:') && !i.hidden && i.id !== 'unverified').map(i => `${i.title}: ${i.detail}`)
+  };
+  const r = await send({
+    type: 'WRITE', key: state.key, tabId: state.tab?.id,
+    options: currentOptions({ format: v.format, revise, previous: c.text })
+  });
+  if (!r.ok) toast(r.error, { type: 'error' });
+  else toast('Rewriting with fixes…');
+}
+
+// ─── Evidence: click a sentence in the message to see where it came from ─────
+function sentenceAt(pos) {
+  if (!lastCheck) return null;
+  return lastCheck.grounding.sentences.find(s => s.status !== 'neutral' && pos >= s.start && pos <= s.end) || null;
+}
+
+function showEvidenceAtCaret() {
+  const sen = sentenceAt($('message').selectionStart);
+  if (!sen) { hideEvidence(); return; }
+  openEvidence(sen);
+}
+
+function openEvidence(sen) {
+  state.activeSentence = sen.start;
+  const box = $('evidence');
+  box.classList.remove('hidden');
+  box.dataset.status = sen.status;
+  $('ev-badge').textContent = sen.status === 'backed' ? '✓' : '!';
+  $('ev-title').textContent = sen.status === 'backed'
+    ? (sen.aboutSender ? 'Backed by your own details' : 'Where this came from')
+    : 'Couldn’t verify this sentence';
+
+  const list = $('ev-list');
+  list.innerHTML = '';
+  // Group the claims by the source that backs them.
+  const groups = new Map();
+  for (const c of sen.claims) {
+    const key = c.found ? `${c.source.label}|${c.source.snippet}` : `missing|${c.value}`;
+    if (!groups.has(key)) groups.set(key, { claim: c, terms: [] });
+    groups.get(key).terms.push(c.display || c.value);
+  }
+  for (const { claim, terms } of [...groups.values()].sort((a, b) => Number(a.claim.found) - Number(b.claim.found))) {
+    const li = el('li', `ev-item ${claim.found ? 'ok' : 'miss'}`);
+    li.appendChild(el('div', 'ev-terms', terms.map(t => `“${t}”`).join(', ')));
+    if (claim.found) {
+      const src = el('div', 'ev-src');
+      src.append(el('b', '', claim.source.label), document.createTextNode(`: ${claim.source.snippet}`));
+      if (claim.source.url) {
+        const a = el('a', 'ev-link', `Open ${hostOf(claim.source.url)} ↗`);
+        a.href = claim.source.url; a.target = '_blank'; a.rel = 'noopener';
+        src.append(' ', a);
+      }
+      li.appendChild(src);
+    } else {
+      const where = sen.aboutSender ? 'your bio or LinkedIn profile' : 'their profile or the research';
+      li.appendChild(el('div', 'ev-src', `Not found in ${where}. Check it before sending, or use Fix with AI.`));
+    }
+    list.appendChild(li);
+  }
+  if (!state.settings.evHintSeen) {
+    state.settings.evHintSeen = true;
+    chrome.storage.local.set({ evHintSeen: true });
+  }
+  $('ev-hint').classList.add('hidden');
+  if (lastCheck) renderBackdrop(lastCheck);
+}
+
+function hideEvidence() {
+  const was = state.activeSentence !== null && state.activeSentence !== undefined;
+  state.activeSentence = null;
+  $('evidence').classList.add('hidden');
+  updateEvidenceHint();
+  if (was && lastCheck) renderBackdrop(lastCheck);
+}
+
+function updateEvidenceHint() {
+  const factual = lastCheck ? lastCheck.grounding.sentences.some(s => s.status !== 'neutral') : false;
+  const open = !$('evidence').classList.contains('hidden');
+  $('ev-hint').classList.toggle('hidden', !factual || open || !!state.settings.evHintSeen);
+}
+
+// ─── Insights: what gets replies ──────────────────────────────────────────────
+function renderInsights() {
+  const box = $('insights');
+  const sent = state.contacts.filter(c => c.status === 'sent' || c.status === 'replied');
+  if (sent.length < 3) {
+    box.classList.toggle('hidden', !state.contacts.length);
+    box.innerHTML = '';
+    if (state.contacts.length) {
+      box.appendChild(el('div', 'ins-hint', `Mark messages as sent and replied. After ${3 - sent.length} more sent, you’ll see what gets replies.`));
+    }
+    return;
+  }
+  const replied = sent.filter(c => c.status === 'replied').length;
+  const rate = (xs) => (xs.length ? xs.filter(c => c.status === 'replied').length / xs.length : 0);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const comparisons = [
+    ['with common ground', c => (c.signals?.common || 0) > 0, 'without'],
+    ['written with Deep research', c => c.signals?.mode === 'deep', 'with Quick'],
+    ['sent as connection notes', c => (c.signals?.format || c.format) === 'note', 'other formats'],
+    ['in a Casual tone', c => c.signals?.tone === 'Casual', 'other tones']
+  ];
+  let best = null;
+  for (const [label, pred, otherLabel] of comparisons) {
+    const a = sent.filter(pred), b = sent.filter(c => !pred(c));
+    if (a.length < 2 || b.length < 2) continue;
+    const diff = rate(a) - rate(b);
+    if (!best || Math.abs(diff) > Math.abs(best.diff)) best = { label, otherLabel, diff, ra: rate(a), rb: rate(b), na: a.length, nb: b.length };
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = '';
+  const head = el('div', 'ins-head');
+  head.append(el('span', 'ins-big', pct(replied / sent.length)), el('span', 'ins-label', `reply rate · ${replied} of ${sent.length} sent`));
+  box.appendChild(head);
+  if (best && Math.abs(best.diff) >= 0.15) {
+    const better = best.diff > 0;
+    box.appendChild(el('div', 'ins-line',
+      `${better ? '↑' : '↓'} Messages ${best.label} got ${pct(best.ra)} replies vs ${pct(best.rb)} ${best.otherLabel} (${best.na} vs ${best.nb} sent).`));
+  } else {
+    box.appendChild(el('div', 'ins-line muted', 'No clear pattern yet. Keep marking replies.'));
+  }
+  if (sent.length < 20) {
+    box.appendChild(el('div', 'ins-note', `Based on ${sent.length} sent messages, so treat this as a hint. Patterns get reliable with 20+.`));
+  }
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return 'source'; }
+}
+
+function listOf(items) {
+  if (items.length <= 1) return items[0] || '';
+  return items.slice(0, -1).join(', ') + ' or ' + items[items.length - 1];
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ─── Keyboard ─────────────────────────────────────────────────────────────────

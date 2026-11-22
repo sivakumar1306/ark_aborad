@@ -155,10 +155,13 @@
 
     // Experience
     const experienceEntries = parseExperience(getSection('experience'));
-    const currentEntry   = experienceEntries[0] || null;
+    // LinkedIn lists the latest role first even after it ended, so only "Present"
+    // (or an undated top entry) counts as current; otherwise trust the headline.
+    const firstRole = experienceEntries[0];
+    const currentEntry   = experienceEntries.find(e => /present/i.test(e.duration || '')) || (firstRole && !firstRole.duration ? firstRole : null);
     const currentTitle   = currentEntry?.title   || fromHeadline(headline, 'title');
     const currentCompany = currentEntry?.company || fromHeadline(headline, 'company');
-    const pastCompanies  = [...new Set(experienceEntries.slice(1).map(e => e.company).filter(c => c && c !== currentCompany))];
+    const pastCompanies  = [...new Set(experienceEntries.filter(e => e !== currentEntry).map(e => e.company).filter(c => c && c !== currentCompany))];
 
     // Education
     const eduSection = getSection('education');
@@ -255,7 +258,7 @@
   }
 
   function markCurrent(entries) {
-    return entries.map((e, i) => ({ ...e, isCurrent: i === 0 || /present/i.test(e.duration || '') }));
+    return entries.map((e, i) => ({ ...e, isCurrent: /present/i.test(e.duration || '') || (i === 0 && !e.duration) }));
   }
 
   function fromHeadline(headline, field) {

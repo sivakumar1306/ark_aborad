@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Outreach AI",
-  "version": "4.0.0",
-  "description": "Personalised LinkedIn outreach from the profile you're viewing. Side panel, one-click insert, follow-up tracker. Requires a license key.",
+  "version": "4.3.0",
+  "description": "Personalised, fact-checked LinkedIn outreach from the profile you're viewing. Free on-device mode, or Claude with your own API key. No license key.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
@@ -16,7 +16,7 @@
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://linkedin-extention-production.up.railway.app/*"
+    "https://api.anthropic.com/*"
   ],
   "background": {
     "service_worker": "background.js"
