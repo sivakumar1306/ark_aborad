@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.5.1
+
+- Fixed: a pasted Gemini key could be treated as an Anthropic key. Keys are cleaned (spaces, zero-width characters, quotes) and anything not starting with `sk-ant-` is treated as Gemini.
+- The panel warns when the background worker is still running older code after an update ("click ↻ reload in chrome://extensions").
+
 ## 4.5.0: Google Gemini as a second provider
 
 - Paste either an Anthropic key (`sk-ant-…`) or a Google Gemini key (`AIza…`, free tier from aistudio.google.com). The provider is detected from the key.

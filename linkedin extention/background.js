@@ -14,6 +14,10 @@ importScripts('utils/api.js', 'utils/session.js', 'utils/formats.js', 'utils/con
   'utils/localwriter.js', 'utils/prompts.js', 'utils/recipient.js', 'utils/names.js', 'utils/gemini.js');
 
 const FOLLOWUP_ALARM = 'ark-followups';
+// Bumped with code changes. The panel compares it with its own: after a `git pull`,
+// the panel reloads from disk but this worker keeps the old code until the extension
+// is reloaded in chrome://extensions.
+const BUILD = '4.5.1';
 const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -71,6 +75,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 const HANDLERS = {
+  PING:            ()  => ({ build: BUILD }),
   SCRAPE:          (m) => scrapeIntoSession(m),
   GENERATE:        (m) => runJob(m.key, () => jobGenerate(m)),
   WRITE:           (m) => runJob(m.key, () => jobWrite(m)),
@@ -435,7 +440,7 @@ function bioFrom(p) {
 
 // ─── The user's own Anthropic API key (optional) ──────────────────────────────
 async function testKey(rawKey) {
-  const key = (rawKey || '').trim();
+  const key = Gemini.cleanKey(rawKey);
   if (!key) throw new Error('Paste an Anthropic (sk-ant-…) or Gemini (AIza…) API key first.');
   let status;
   const save = {};

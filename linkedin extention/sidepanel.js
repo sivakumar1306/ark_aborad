@@ -12,6 +12,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const SETTINGS_KEYS = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeFileName', 'prefs',
   'noteLimit', 'followUpDays', 'theme', 'showFab', 'onboarded', 'myProfile', 'groundNudgeDismissed', 'evHintSeen'];
 const DEFAULT_PREFS = { purpose: 'Auto', tone: 'Neutral', format: 'note', mode: 'quick' };
+const BUILD = '4.5.1'; // must match background.js
 
 const state = {
   tab: null,
@@ -45,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderTracker();
   await refreshTab();
   maybeOnboard();
+  checkBuild();
 
   chrome.storage.onChanged.addListener(onStorageChanged);
   if (!state.pinnedTabId) {
@@ -102,6 +104,14 @@ function onStorageChanged(changes, area) {
     if (changes.userName || changes.userBio) syncAboutFields();
     renderCompose();
   }
+}
+
+// After pulling new code, the background worker keeps running the old version until
+// the extension is reloaded. Say so plainly instead of failing in odd ways.
+async function checkBuild() {
+  const r = await send({ type: 'PING' });
+  if (r.ok && r.build === BUILD) return;
+  $('stale-banner').classList.remove('hidden');
 }
 
 // ─── Tab tracking ─────────────────────────────────────────────────────────────
@@ -750,7 +760,7 @@ function wireSettings() {
   const flash = savedFlash();
 
   $('api-key').addEventListener('input', debounce(async (e) => {
-    const userApiKey = e.target.value.trim();
+    const userApiKey = Gemini.cleanKey(e.target.value);
     await chrome.storage.local.set({ userApiKey });
     flash();
   }, 400));
@@ -857,7 +867,7 @@ function aiLabel() {
 }
 
 async function testKey(input, btn, statusEl) {
-  const key = input.value.trim();
+  const key = Gemini.cleanKey(input.value);
   if (!key) { input.focus(); return null; }
   btn.disabled = true;
   const prev = btn.textContent;

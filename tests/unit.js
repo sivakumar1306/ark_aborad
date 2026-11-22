@@ -234,6 +234,8 @@ console.log('\nClaude client');
 
   console.log('\nGemini client');
   check('key prefix picks the provider', Gemini.isGeminiKey('AIzaSyX') && !Gemini.isGeminiKey('sk-ant-x'));
+  check('pasted junk stripped (spaces, zero-width, quotes)', Gemini.cleanKey(' \u200B"AIzaSy X\u00A0"\n') === 'AIzaSyX');
+  check('any non-Anthropic key is treated as Gemini', Gemini.isGeminiKey('\u200BAIzaSyX') && Gemini.isGeminiKey('AQ.newformat123') && !Gemini.isGeminiKey(' sk-ant-api03-x') && !Gemini.isGeminiKey(''));
   check('model labels', Gemini.label('gemini-2.5-flash') === 'Gemini 2.5 Flash' && Gemini.label('gemini-3-flash') === 'Gemini 3 Flash');
   global.fetch = async () => respond(200, { models: ['gemini-2.0-flash', 'gemini-3-flash', 'gemini-3-flash-preview-tts', 'gemini-3-pro', 'gemini-2.5-flash-lite'].map(n => ({ name: `models/${n}`, supportedGenerationMethods: ['generateContent'] })) });
   check('picks the newest stable Flash', (await Gemini.pickModel('AIza')) === 'gemini-3-flash');

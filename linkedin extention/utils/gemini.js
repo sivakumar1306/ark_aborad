@@ -11,7 +11,17 @@ const Gemini = (() => {
   const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
   const FALLBACK_MODEL = 'gemini-2.5-flash';
 
-  function isGeminiKey(key) { return /^AIza/.test(String(key || '').trim()); }
+  // Pasted keys often carry invisible characters, spaces or quotes; strip them.
+  function cleanKey(key) {
+    return String(key || '').replace(/[\s\u200B-\u200D\u2060\uFEFF"'`“”‘’]/g, '');
+  }
+
+  // Anthropic keys always start with "sk-ant-". Anything else is treated as a Google
+  // Gemini key (usually "AIza…", but Google can change the format).
+  function isGeminiKey(key) {
+    const k = cleanKey(key);
+    return !!k && !/^sk-ant-/i.test(k);
+  }
 
   function label(model) {
     const m = /gemini-([\d.]+)-(flash|pro)(-lite)?/i.exec(model || '');
@@ -133,7 +143,7 @@ const Gemini = (() => {
     return anyFlash[0] || usable[0] || FALLBACK_MODEL;
   }
 
-  return { generate, textOf, sourcesOf, searchCount, pickModel, isGeminiKey, label, API_BASE, FALLBACK_MODEL };
+  return { generate, textOf, sourcesOf, searchCount, pickModel, isGeminiKey, cleanKey, label, API_BASE, FALLBACK_MODEL };
 })();
 
 if (typeof module !== 'undefined') module.exports = Gemini;

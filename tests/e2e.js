@@ -103,6 +103,7 @@ async function main() {
   await panel.goto(panelUrl);
   await panel.waitForSelector('#onboarding:not(.hidden)');
   check('onboarding shown on first run', true);
+  check('no "reload the extension" banner when builds match', await panel.isHidden('#stale-banner'));
   await shot('01-onboarding');
   check('free mode offered, no key required', await panel.isVisible('#ob-free'));
   await panel.fill('#ob-key', 'sk-ant-wrong-key-zzzzzzzzzzzzzzzzzzzzzz');
