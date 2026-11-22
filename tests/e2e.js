@@ -75,7 +75,7 @@ async function main() {
   await ctx.route('https://www.linkedin.com/**', route => {
     const url = route.request().url();
     if (/\/in\/me\/?$/.test(url)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<script>location.replace("/in/sam-rivera-test/")</script>' });
-    const file = /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
+    const file = /\/in\/rahul/.test(url) ? 'profile-real.html' : /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
     if (!file) return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>Feed</h1></body></html>' });
     route.fulfill({ status: 200, contentType: 'text/html', body: fs.readFileSync(path.join(__dirname, 'fixtures', file), 'utf8') });
   });
@@ -326,7 +326,28 @@ async function main() {
   check('fallback parser: title/company', s2.profile.experienceEntries[0]?.title === 'Product Designer' && s2.profile.currentCompany === 'Northwind', s2.profile.experienceEntries);
   check('fallback parser: second role not polluted by location', s2.profile.experienceEntries[1]?.title === 'UX Designer' && s2.profile.experienceEntries[1]?.company === 'Shopify', s2.profile.experienceEntries);
   check('headline + location', s2.profile.headline.includes('Product Designer @ Northwind') && s2.profile.location === 'Toronto, Ontario, Canada', [s2.profile.headline, s2.profile.location]);
+  check('newer layout: About with a "… more" button is read', s2.profile.about.includes('Designer who codes') && s2.profile.about.includes('motion design') && !/more$/.test(s2.profile.about), s2.profile.about);
+  check('newer layout: post read, author headline skipped', s2.profile.recentPosts.length === 1 && s2.profile.recentPosts[0].startsWith('Shipped dark mode'), s2.profile.recentPosts);
   check('InMail shows subject + body meter', (await panel3.inputValue('#message')).startsWith('Subject:') && (await panel3.textContent('#meter-text')).includes('/ 1900'));
+
+  // ── 9b. Real LinkedIn markup: posts with nested links, <br> About, skills ─
+  console.log('\nReal-markup profile');
+  await li.goto('https://www.linkedin.com/in/rahul-real-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Rahul Verma', null, { timeout: 8000 });
+  check('quick read says posts & skills come with the full read', (await panel3.textContent('#p-quality')).includes('posts & skills load on Generate'), await panel3.textContent('#p-quality'));
+  await panel3.click('#refresh-profile');
+  await panel3.waitForFunction(() => /post/.test(document.getElementById('p-quality').textContent) && !/load on Generate/.test(document.getElementById('p-quality').textContent), null, { timeout: 10000 });
+  const rv = (await sw.evaluate(() => Sessions.get('rahul-real-test'))).profile;
+  check('posts with nested hashtag links are read', rv.recentPosts.length === 2 && rv.recentPosts[0].includes('open-sourced RoboNav') && rv.recentPosts[0].includes('#robotics'), rv.recentPosts);
+  check('author headline in a post card is not mistaken for the post', !rv.recentPosts.some(t => t.includes('AWS Certified')), rv.recentPosts);
+  check('content-free posts ("Congratulations! 🎉") are skipped', !rv.recentPosts.some(t => /Congratulations/.test(t)), rv.recentPosts);
+  check('follower counts / actor lines are not mistaken for posts', !rv.recentPosts.some(t => /followers|2w •|comments/.test(t)));
+  check('skills read from nested markup', rv.skills.join('|') === 'Robot Operating System (ROS)|Python (Programming Language)', rv.skills);
+  check('About text split by <br> is read whole', rv.about.includes('warehouse robots') && rv.about.includes('ROS2 and SLAM'), rv.about);
+  check('review fields show posts and skills', (await panel3.inputValue('[data-edit="recentPosts"]')).includes('RoboNav') && (await panel3.inputValue('[data-edit="skills"]')).includes('Python'));
+  await li.goto('https://www.linkedin.com/in/alex-chen-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Alex Chen', null, { timeout: 8000 });
+  await panel3.waitForSelector('#result:not(.hidden)');
 
   // ── 10. Errors ───────────────────────────────────────────────────────────
   console.log('\nErrors');

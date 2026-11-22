@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.3.3
+
+- Posts with nothing to build on (“Congratulations! 🎉”, “Happy birthday!”, under 6 real words) are no longer used as recent posts or hooks.
+
+## 4.3.2: Newer LinkedIn layout
+
+- Fixed: About came back empty on LinkedIn's newer profile layout, where the "… more" button sits inside the paragraph. The section text is now read directly (minus headings, buttons and screen-reader copies) when that's fuller.
+- Fixed: the author's own headline in a post card was saved as a "recent post". Name, headline, timestamps and follower counts are now skipped, and short posts (“Congratulations! 🎉”) are kept.
+- Test pages now cover both layouts; the new checks fail on the previous reader.
+
+## 4.3.1: Profile reading fix
+
+- Fixed: recent posts and skills came back empty on real LinkedIn profiles. The reader only took `aria-hidden` text when any existed, which skipped post text (nested hashtag links) and text split by `<br>`. It now reads all visible text except screen-reader copies, and reads posts by their longest visible line.
+- The quick first read now always says that posts and skills load on Generate or ↻.
+- New test page modelled on LinkedIn's real markup (fails on the old reader, passes now).
+
 ## 4.3.0: Evidence on click
 
 - Click any highlighted sentence in the message to see its evidence: the profile field, post or web article it came from (with a link), or exactly which words couldn't be found. The clicked sentence is outlined in the message.

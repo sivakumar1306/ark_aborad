@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Outreach AI",
-  "version": "4.3.0",
+  "version": "4.3.3",
   "description": "Personalised, fact-checked LinkedIn outreach from the profile you're viewing. Free on-device mode, or Claude with your own API key. No license key.",
   "minimum_chrome_version": "116",
   "permissions": [

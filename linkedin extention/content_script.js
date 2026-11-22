@@ -103,13 +103,16 @@
 
   // Visible leaf text. LinkedIn duplicates every string in a visually-hidden span;
   // the aria-hidden="true" copy is the one users see, so prefer it when present.
+  // LinkedIn renders most strings twice: a visible copy (often span[aria-hidden="true"])
+  // and a screen-reader copy (.visually-hidden). Take every visible text element,
+  // skip the screen-reader copies, and treat text broken only by <br> as one leaf.
+  const isLeaf = (el) => Array.from(el.children).every(c => c.tagName === 'BR');
   function leafTexts(root) {
     if (!root) return [];
-    let els = Array.from(root.querySelectorAll('span[aria-hidden="true"]'));
-    if (!els.length) {
-      els = Array.from(root.querySelectorAll('p, span, a, div'))
-        .filter(el => el.children.length === 0 && !el.closest('.visually-hidden, .sr-only'));
-    }
+    const els = Array.from(root.querySelectorAll('span[aria-hidden="true"], p, span, a, h3, h4, div'))
+      .filter(el => !el.closest('.visually-hidden, .sr-only'))
+      .filter(el => el.matches('span[aria-hidden="true"]') || isLeaf(el))
+      .filter(el => !el.parentElement?.closest('span[aria-hidden="true"]')); // already covered by its parent
     const out = [];
     for (const el of els) {
       const t = clean(el.innerText || el.textContent);
@@ -149,9 +152,12 @@
       }
     }
 
-    // About
-    const aboutTexts = leafTexts(getSection('about')).filter(t => !/^about$/i.test(t));
-    const about = aboutTexts.sort((a, b) => b.length - a.length)[0] || '';
+    // About. Newer layouts put a "… more" button inside the paragraph, so it isn't a
+    // leaf; read the section's text directly too and keep whichever is fuller.
+    const aboutSec = getSection('about');
+    const aboutLeaf = leafTexts(aboutSec).filter(t => !/^about$/i.test(t)).sort((a, b) => b.length - a.length)[0] || '';
+    const aboutText = plainText(aboutSec).replace(/^about\s+/i, '');
+    const about = aboutText.length > aboutLeaf.length + 10 ? aboutText : aboutLeaf;
 
     // Experience
     const experienceEntries = parseExperience(getSection('experience'));
@@ -175,16 +181,21 @@
     const skillSection = getSection('skills');
     let skills = topItems(skillSection).map(li => leafTexts(li)[0]);
     if (!skills.length) skills = leafTexts(skillSection);
+    if (!skills.length && skillSection) skills = visibleLines(skillSection);
     skills = [...new Set(skills.filter(t => t && !/^skills$/i.test(t) && t.length < 60 && !DATE_RE.test(t) && !/passed|assessment|dialog|window|escape/i.test(t)))];
 
     // Recent posts
     const recentPosts = [];
     const act = getSection('activity');
     if (act) {
+      // Post text has nested links/hashtags, so read whole visible lines rather than leaves.
       const items = topItems(act);
-      const sources = items.length ? items.map(li => leafTexts(li).sort((a, b) => b.length - a.length)[0]) : leafTexts(act);
+      const own = { name, headline };
+      const sources = items.length
+        ? items.map(li => postTextOf(li, own))
+        : visibleLines(act).filter(t => t.length > 40 && !isOwnLine(t, own));
       for (const t of sources) {
-        if (t && t.length > 40 && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
+        if (t && hasSubstance(t) && t.length < 1200 && !/dialog|window|escape|notifications|premium|people you may|you might|followers/i.test(t) && !recentPosts.includes(t)) {
           recentPosts.push(t.slice(0, 500));
         }
       }
@@ -205,6 +216,56 @@
       profileUrl:        window.location.origin + window.location.pathname.replace(/\/+$/, '') + '/',
       rawTitle:          document.title
     };
+  }
+
+  // Visible text of an element as clean lines (innerText respects layout and hides screen-reader copies' CSS).
+  function visibleLines(el) {
+    return String(el.innerText || '').split('\n').map(clean)
+      .map(t => t.replace(/…\s*(see )?more$/i, '').trim())
+      .filter(t => t.length > 1 && !JUNK_RE.test(t));
+  }
+
+  // Text of an element without headings, buttons ("… more") and screen-reader copies,
+  // with words kept apart (textContent would glue block elements together).
+  function plainText(el) {
+    if (!el) return '';
+    const c = el.cloneNode(true);
+    c.querySelectorAll('h2, .visually-hidden, .sr-only, button, [role="button"], svg').forEach(n => n.remove());
+    c.querySelectorAll('br').forEach(b => b.replaceWith(' '));
+    const parts = [];
+    const w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) parts.push(w.currentNode.nodeValue);
+    return clean(parts.join(' ')).replace(/\s*(…|\.\.\.)\s*(see )?more$/i, '…');
+  }
+
+  // Lines in a post card that belong to the author block, not the post: their name,
+  // their headline (possibly truncated with "…"), timestamps, follower counts.
+  function isOwnLine(t, { name, headline }) {
+    const n = t.replace(/…$/, '').trim().toLowerCase();
+    if (!n) return true;
+    if (name && n === name.toLowerCase()) return true;
+    if (headline) {
+      const h = headline.toLowerCase();
+      if (n === h || h.startsWith(n) || (n.length > 25 && n.startsWith(h.slice(0, 25)))) return true;
+    }
+    return /^\d+\s?(m|h|d|w|mo|yr|yrs)\b|•\s*(edited)?$|followers?$|^follow$|^\d+(st|nd|rd|th)\+?$/i.test(t);
+  }
+
+  // A post is only a useful hook if it says something: "Congratulations! 🎉" or
+  // "Happy birthday!" doesn't. Count real words, ignoring emoji and punctuation.
+  function hasSubstance(t) {
+    const words = String(t).replace(/[^\p{L}\p{N}\s'’-]/gu, ' ').split(/\s+/).filter(w => /\p{L}/u.test(w));
+    return words.length >= 6;
+  }
+
+  function postTextOf(item, own = {}) {
+    const junk = /hasn.t posted|reposted this|commented on|liked this|followers?$|^\d+ (comments?|reposts?|reactions?)/i;
+    // The post's own text container, when LinkedIn marks it, wins even if short ("Congratulations! 🎉").
+    const preferred = Array.from(item.querySelectorAll('.update-components-text, .feed-shared-inline-show-more-text, [dir="ltr"]'))
+      .map(e => clean(e.innerText || e.textContent)).filter(t => t.length >= 12 && !junk.test(t) && !isOwnLine(t, own));
+    if (preferred.length) return preferred.sort((a, b) => b.length - a.length)[0];
+    const lines = visibleLines(item).filter(t => t.length >= 12 && !junk.test(t) && !isOwnLine(t, own));
+    return lines.sort((a, b) => b.length - a.length)[0] || '';
   }
 
   function parseExperience(section) {

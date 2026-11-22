@@ -355,8 +355,8 @@ function renderProfile(s) {
   ].filter(Boolean);
   const q = $('p-quality');
   q.className = 'quality ' + (found.length >= 4 ? 'good' : found.length >= 2 ? 'ok' : 'low');
-  q.textContent = !s.profile.full && found.length < 3
-    ? 'Top of profile read · full read happens when you generate'
+  q.textContent = !s.profile.full
+    ? `${found.length ? `Found: ${found.join(' · ')} · ` : ''}posts & skills load on Generate or ↻`
     : found.length ? `Found: ${found.join(' · ')}` : 'Very little found. Add details below';
   $('review').classList.remove('hidden');
 
