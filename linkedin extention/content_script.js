@@ -76,19 +76,68 @@
 
   // LinkedIn lazy-renders sections below the fold. Nudge them into existence,
   // then put the user back exactly where they were.
+  // Some LinkedIn layouts scroll the window, others an inner panel. Bringing the last
+  // section into view works for both; we also nudge whichever element scrolls, and
+  // put everything back where the user had it.
   async function loadLazySections() {
     const needed = ['experience', 'education', 'skills'];
     const hasAll = () => needed.every(n => getSection(n)?.querySelector('li, p'));
     if (hasAll()) return;
+    const h1 = document.querySelector('main h1, h1');
+    const scroller = scrollParent(h1);
+    const startTop = scroller ? scroller.scrollTop : 0;
     const startY = window.scrollY;
-    const maxY = Math.min(document.body.scrollHeight, 6000);
-    for (let y = startY + 700; y < maxY; y += 700) {
-      window.scrollTo({ top: y, behavior: 'instant' });
-      await wait(220);
+    let lastCount = -1, stalls = 0;
+    for (let i = 0; i < 14; i++) {
+      const sections = document.querySelectorAll('section');
+      sections[sections.length - 1]?.scrollIntoView({ block: 'end', behavior: 'instant' });
+      if (scroller) scroller.scrollTop += 700;
+      window.scrollBy({ top: 700, behavior: 'instant' });
+      await wait(250);
       if (hasAll()) break;
+      const count = document.querySelectorAll('section').length;
+      stalls = count === lastCount ? stalls + 1 : 0;
+      lastCount = count;
+      if (stalls >= 3) break; // nothing new is loading
     }
+    if (scroller) scroller.scrollTop = startTop;
     window.scrollTo({ top: startY, behavior: 'instant' });
     await wait(80);
+  }
+
+  function scrollParent(el) {
+    for (let n = el?.parentElement; n && n !== document.body; n = n.parentElement) {
+      const oy = getComputedStyle(n).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 20) return n;
+    }
+    return null;
+  }
+
+  // The company LinkedIn shows next to the name ("Current company: X. Click to skip…").
+  function topCardCompany(top) {
+    const label = Array.from(document.querySelectorAll('[aria-label]'))
+      .map(e => e.getAttribute('aria-label'))
+      .find(l => /^current company:/i.test(l || ''));
+    if (label) return clean(label.replace(/^current company:\s*/i, '').replace(/\.?\s*click to.*$/i, ''));
+    const a = top && top.querySelector && top.querySelector('a[href*="/company/"]');
+    const t = a ? clean(a.innerText || a.textContent) : '';
+    return t && t.length < 80 ? t : null;
+  }
+
+  // "Assistant Director (IIC), Associate Professor, VIT, Chennai and CEO, MEDxAI Pvt. Ltd."
+  // → [{title:'Assistant Director (IIC)', company:'VIT, Chennai'}, …, {title:'CEO', company:'MEDxAI Pvt. Ltd.'}]
+  const ROLE_WORD = /\b(ceo|cto|coo|cfo|founder|co-?founder|director|professor|lecturer|dean|head|manager|lead|engineer|developer|scientist|analyst|designer|consultant|researcher|recruiter|intern|student|officer|president|vp|partner|architect|associate|assistant|specialist|fellow|advisor|mentor)\b/i;
+  function headlineRoles(headline) {
+    const roles = [];
+    for (const part of String(headline || '').split(/\s+and\s+|\s*[|•·]\s*/)) {
+      const at = part.match(/^(.+?)\s+(?:at|@)\s+(.+)$/i);
+      if (at && ROLE_WORD.test(at[1])) { roles.push({ title: clean(at[1]), company: clean(at[2]) }); continue; }
+      const bits = part.split(/\s*,\s*/).filter(Boolean);
+      const titles = [];
+      while (bits.length && ROLE_WORD.test(bits[0])) titles.push(bits.shift());
+      if (titles.length && bits.length) titles.forEach(t => roles.push({ title: clean(t), company: clean(bits.join(', ')) }));
+    }
+    return roles;
   }
 
   function getSection(name) {
@@ -164,10 +213,18 @@
     // LinkedIn lists the latest role first even after it ended, so only "Present"
     // (or an undated top entry) counts as current; otherwise trust the headline.
     const firstRole = experienceEntries[0];
-    const currentEntry   = experienceEntries.find(e => /present/i.test(e.duration || '')) || (firstRole && !firstRole.duration ? firstRole : null);
+    const presentRoles = experienceEntries.filter(e => /present/i.test(e.duration || ''));
+    // People often hold several current roles; keep them all.
+    const currentRoles = (presentRoles.length ? presentRoles : headlineRoles(headline))
+      .filter(r => r.title).map(r => ({ title: r.title, company: r.company || null })).slice(0, 4);
+    const cardCompany = topCardCompany(top);
+    const sameCo = (a, b) => a && b && (a.toLowerCase().includes(b.toLowerCase()) || b.toLowerCase().includes(a.toLowerCase()));
+    // The header's "current company" is LinkedIn's own pick of the primary role.
+    const currentEntry   = (cardCompany && currentRoles.find(r => sameCo(r.company, cardCompany)))
+      || presentRoles[0] || (firstRole && !firstRole.duration ? firstRole : null) || currentRoles[0] || null;
     const currentTitle   = currentEntry?.title   || fromHeadline(headline, 'title');
-    const currentCompany = currentEntry?.company || fromHeadline(headline, 'company');
-    const pastCompanies  = [...new Set(experienceEntries.filter(e => e !== currentEntry).map(e => e.company).filter(c => c && c !== currentCompany))];
+    const currentCompany = cardCompany || currentEntry?.company || fromHeadline(headline, 'company');
+    const pastCompanies  = [...new Set(experienceEntries.filter(e => e !== currentEntry && !/present/i.test(e.duration || '')).map(e => e.company).filter(c => c && c !== currentCompany))];
 
     // Education
     const eduSection = getSection('education');
@@ -206,6 +263,7 @@
       headline,
       currentTitle,
       currentCompany,
+      currentRoles,
       location: loc,
       about: about.slice(0, 2600),
       recentPosts:       recentPosts.slice(0, 3),

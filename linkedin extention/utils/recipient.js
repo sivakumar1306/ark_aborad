@@ -42,7 +42,7 @@ const Recipient = (() => {
   /** @returns {{type:string, label:string, icon:string, article:string, purpose:string, guidance:string, why:string}|null} */
   function classify(p = {}) {
     // The current title is the strongest signal; the headline adds context.
-    const sources = [['title', p.currentTitle], ['headline', p.headline]].filter(([, v]) => v);
+    const sources = [['title', p.currentTitle], ...(p.currentRoles || []).map(r => ['role', r.title]), ['headline', p.headline]].filter(([, v]) => v);
     for (const [type, re] of RULES) {
       for (const [where, text] of sources) {
         const m = re.exec(text);

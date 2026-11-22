@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.4.1: Multi-role profiles and inner-panel scrolling
+
+- Current company is read from LinkedIn's profile header ("Current company: …"), so it's no longer empty for headlines like "Associate Professor, VIT and CEO, MEDxAI Pvt. Ltd.".
+- Several current roles are kept (`currentRoles`), from "Present" jobs in Experience, or split out of the headline. The primary title is the one at the header's company. Ongoing jobs no longer count as "past companies".
+- Lazy sections (Experience, About, Skills) now load on layouts that scroll an inner panel instead of the window: the reader brings sections into view and restores the panel's position.
+- All current roles reach the fact check, the AI prompt and the recipient classifier.
+
 ## 4.4.0: Recipient-aware messages
 
 - The extension now works out who the recipient is from their title and headline: student, recruiter, team lead or manager, founder, senior engineer, or other professional. It's shown as a chip with the reason.

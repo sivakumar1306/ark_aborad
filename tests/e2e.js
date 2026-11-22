@@ -75,7 +75,7 @@ async function main() {
   await ctx.route('https://www.linkedin.com/**', route => {
     const url = route.request().url();
     if (/\/in\/me\/?$/.test(url)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<script>location.replace("/in/sam-rivera-test/")</script>' });
-    const file = /\/in\/rahul/.test(url) ? 'profile-real.html' : /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
+    const file = /\/in\/sheena/.test(url) ? 'profile-multi.html' : /\/in\/rahul/.test(url) ? 'profile-real.html' : /\/in\/alex/.test(url) ? 'profile-modern.html' : /\/in\/sam-rivera/.test(url) ? 'profile-me.html' : /\/in\//.test(url) ? 'profile-classic.html' : null;
     if (!file) return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>Feed</h1></body></html>' });
     route.fulfill({ status: 200, contentType: 'text/html', body: fs.readFileSync(path.join(__dirname, 'fixtures', file), 'utf8') });
   });
@@ -345,6 +345,23 @@ async function main() {
   check('skills read from nested markup', rv.skills.join('|') === 'Robot Operating System (ROS)|Python (Programming Language)', rv.skills);
   check('About text split by <br> is read whole', rv.about.includes('warehouse robots') && rv.about.includes('ROS2 and SLAM'), rv.about);
   check('review fields show posts and skills', (await panel3.inputValue('[data-edit="recentPosts"]')).includes('RoboNav') && (await panel3.inputValue('[data-edit="skills"]')).includes('Python'));
+
+  console.log('\nSeveral current roles + inner scroll panel');
+  await li.goto('https://www.linkedin.com/in/sheena-multi-test/');
+  await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Dr. Sheena Christabel Pravin', null, { timeout: 8000 });
+  const sh0 = (await sw.evaluate(() => Sessions.get('sheena-multi-test'))).profile;
+  check('company from the profile header, not empty', sh0.currentCompany === 'MEDxAI INNOVATIONS Pvt. Ltd.', sh0.currentCompany);
+  check('roles split out of a multi-role headline', sh0.currentRoles.length === 3 && sh0.currentRoles[2].title === 'CEO' && sh0.currentRoles[0].company.startsWith('Vellore'), sh0.currentRoles);
+  check('current title matches the header company', sh0.currentTitle === 'CEO', sh0.currentTitle);
+  await panel3.click('#refresh-profile');
+  await panel3.waitForFunction(() => /roles/.test(document.getElementById('p-quality').textContent), null, { timeout: 15000 });
+  const sh = (await sw.evaluate(() => Sessions.get('sheena-multi-test'))).profile;
+  check('lazy sections load when an inner panel scrolls', sh.experienceEntries.length === 4 && sh.about.includes('medical AI') && sh.skills.length === 2, [sh.experienceEntries.length, sh.about, sh.skills]);
+  check('all current roles kept from Experience', sh.currentRoles.length === 3 && sh.currentTitle === 'Chief Executive Officer' && sh.currentCompany === 'MEDxAI INNOVATIONS Pvt. Ltd.', [sh.currentTitle, sh.currentRoles]);
+  check('only ended jobs count as past companies', sh.pastCompanies.join() === 'SSN College of Engineering', sh.pastCompanies);
+  check('inner panel scroll position restored', (await li.evaluate(() => document.getElementById('workspace').scrollTop)) === 0);
+  check('recipient: founder/CEO', (await panel3.textContent('#rc-chip')).includes('Founder'));
+
   await li.goto('https://www.linkedin.com/in/alex-chen-test/');
   await panel3.waitForFunction(() => document.getElementById('p-name').textContent === 'Alex Chen', null, { timeout: 8000 });
   await panel3.waitForSelector('#result:not(.hidden)');
