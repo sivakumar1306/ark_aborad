@@ -584,7 +584,8 @@ async function main() {
   await panel3.fill('#api-key', 'AIzaTEST-valid-key-0123456789abcdefghijk');
   await panel3.click('#test-key-btn');
   await panel3.waitForSelector('#key-status[data-status="valid"]');
-  check('Gemini key works; newest stable Flash picked (not TTS/Lite/Pro)', (await panel3.textContent('#key-status')).includes('Gemini 2.5 Flash'), await panel3.textContent('#key-status'));
+  check('newest model overloaded → falls back to the next Flash (not TTS/Lite/Pro)', (await panel3.textContent('#key-status')).includes('Gemini 2.5 Flash'), await panel3.textContent('#key-status'));
+  check('…after actually trying the newest one', (await getLog()).some(e => /gemini-3\.8-flash:generateContent/.test(e.path)));
   await panel3.waitForFunction(() => document.getElementById('mode-chip').textContent === 'AI · Gemini 2.5 Flash');
   check('chip shows Gemini', true);
   check('Claude model picker hidden for a Gemini key', await panel3.isHidden('#model-field'));

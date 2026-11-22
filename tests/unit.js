@@ -239,6 +239,7 @@ console.log('\nClaude client');
   check('model labels', Gemini.label('gemini-2.5-flash') === 'Gemini 2.5 Flash' && Gemini.label('gemini-3-flash') === 'Gemini 3 Flash');
   global.fetch = async () => respond(200, { models: ['gemini-2.0-flash', 'gemini-3-flash', 'gemini-3-flash-preview-tts', 'gemini-3-pro', 'gemini-2.5-flash-lite'].map(n => ({ name: `models/${n}`, supportedGenerationMethods: ['generateContent'] })) });
   check('picks the newest stable Flash', (await Gemini.pickModel('AIza')) === 'gemini-3-flash');
+  check('ranks stable Flash newest-first, then Flash-Lite', JSON.stringify(await Gemini.rankModels('AIza')) === JSON.stringify(['gemini-3-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite']), await Gemini.rankModels('AIza'));
   global.fetch = async () => respond(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } });
   check('invalid key → auth', (await Gemini.generate('AIza', { model: 'm', system: 's', text: 't' }).catch(e => e)).code === 'auth');
   let calls = 0;

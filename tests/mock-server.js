@@ -161,11 +161,13 @@ async function gemini(req, body, send) {
   if (req.headers['x-goog-api-key'] !== GEMINI_KEY) return gerr(400, 'INVALID_ARGUMENT', 'API key not valid. Please pass a valid API key.');
   if (req.method === 'GET' && req.url.startsWith('/v1beta/models')) {
     const m = (name, methods = ['generateContent', 'countTokens']) => ({ name: `models/${name}`, supportedGenerationMethods: methods });
-    return send(200, { models: [m('gemini-2.0-flash'), m('gemini-2.5-flash'), m('gemini-2.5-flash-lite'), m('gemini-2.5-pro'),
+    return send(200, { models: [m('gemini-3.8-flash'), m('gemini-2.0-flash'), m('gemini-2.5-flash'), m('gemini-2.5-flash-lite'), m('gemini-2.5-pro'),
       m('gemini-2.5-flash-preview-tts'), m('text-embedding-004', ['embedContent'])] });
   }
   const model = (/models\/([^:]+):generateContent/.exec(req.url) || [])[1];
   if (!model) return gerr(404, 'NOT_FOUND', 'Not found');
+  // The newest model is "overloaded", like a fresh model on the free tier often is.
+  if (model === 'gemini-3.8-flash') return gerr(503, 'UNAVAILABLE', 'The model is overloaded. Please try again later.');
   const text = (body.contents?.[0]?.parts || []).map(p => p.text || '').join('\n');
   const answer = (t, extra = {}) => send(200, {
     candidates: [{ content: { role: 'model', parts: [{ text: 'Let me think…', thought: true }, { text: t }] }, finishReason: 'STOP', ...extra }],

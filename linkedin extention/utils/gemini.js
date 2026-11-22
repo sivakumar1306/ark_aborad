@@ -134,6 +134,27 @@ const Gemini = (() => {
     return (data?.candidates?.[0]?.groundingMetadata?.webSearchQueries || []).length;
   }
 
+  /**
+   * Models to try, best first: stable Flash (newest first), then stable Flash-Lite.
+   * The newest model is often overloaded or limited on the free tier, so callers
+   * walk this list instead of trusting the first entry.
+   */
+  async function rankModels(apiKey) {
+    const data = await request(apiKey, '/models?pageSize=200', { method: 'GET', timeoutMs: 20000 });
+    const usable = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => String(m.name || '').replace(/^models\//, ''))
+      .filter(n => /^gemini-/.test(n) && !/tts|image|embedding|live|audio|vision|learnlm/i.test(n));
+    const version = (n) => parseFloat((/gemini-([\d.]+)/.exec(n) || [])[1] || '0');
+    const byVersion = (a, b) => version(b) - version(a);
+    const flash = usable.filter(n => /^gemini-[\d.]+-flash$/.test(n)).sort(byVersion);
+    const lite = usable.filter(n => /^gemini-[\d.]+-flash-lite$/.test(n)).sort(byVersion);
+    const ranked = [...flash, ...lite];
+    if (!ranked.length) ranked.push(...usable.filter(n => /flash/.test(n)).sort(byVersion));
+    if (!ranked.includes(FALLBACK_MODEL) && usable.includes(FALLBACK_MODEL)) ranked.push(FALLBACK_MODEL);
+    return ranked.length ? ranked.slice(0, 6) : [FALLBACK_MODEL];
+  }
+
   /** Pick the newest stable "flash" model this key can call; fall back sensibly. */
   async function pickModel(apiKey) {
     const data = await request(apiKey, '/models?pageSize=200', { method: 'GET', timeoutMs: 20000 });
@@ -148,7 +169,10 @@ const Gemini = (() => {
     return anyFlash[0] || usable[0] || FALLBACK_MODEL;
   }
 
-  return { generate, textOf, sourcesOf, searchCount, pickModel, isGeminiKey, cleanKey, label, API_BASE, FALLBACK_MODEL };
+  // Errors worth trying the next model for (the key itself is fine).
+  const TRY_NEXT = new Set(['overloaded', 'model', 'permission', 'rate_limit', 'timeout', 'bad_response']);
+
+  return { generate, textOf, sourcesOf, searchCount, pickModel, rankModels, TRY_NEXT, isGeminiKey, cleanKey, label, API_BASE, FALLBACK_MODEL };
 })();
 
 if (typeof module !== 'undefined') module.exports = Gemini;

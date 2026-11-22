@@ -17,8 +17,8 @@ const FOLLOWUP_ALARM = 'ark-followups';
 // Bumped with code changes. The panel compares it with its own: after a `git pull`,
 // the panel reloads from disk but this worker keeps the old code until the extension
 // is reloaded in chrome://extensions.
-const BUILD = '4.5.2';
-const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
+const BUILD = '4.5.3';
+const SETTINGS_KEYS  = ['userApiKey', 'keyStatus', 'writerModel', 'geminiModel', 'geminiModels', 'userName', 'userBio', 'resumeBase64', 'myProfile', 'noteLimit', 'followUpDays'];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(() => {
@@ -142,7 +142,7 @@ async function jobGenerate({ tabId, key, mode, options }) {
       await Sessions.update(key, x => { x.stage = 'researching'; x.steps.research = 'running'; x.notice = `Searching the web for recent news about ${profile.currentCompany || profile.name}…`; return x; });
       // The key decides the provider: AIza… is Gemini (Google Search grounding), sk-ant-… is Claude (web search).
       const r = Gemini.isGeminiKey(settings.userApiKey)
-        ? await Prompts.researchGemini(settings.userApiKey, settings.geminiModel || Gemini.FALLBACK_MODEL, profile, { onRetry: retryNotice(key) })
+        ? (await geminiWithFallback(settings, (m) => Prompts.researchGemini(settings.userApiKey, m, profile, { onRetry: retryNotice(key) }))).result
         : await Prompts.research(settings.userApiKey, profile, { onRetry: retryNotice(key) });
       // Web hooks first, then the strongest profile hooks (their posts).
       const hooks = [...r.hooks, ...local.filter(h => h.kind === 'post')].slice(0, 6);
@@ -225,11 +225,11 @@ async function write(key, options = {}, settings) {
       resumeBase64: settings.resumeBase64 || null
     };
     if (Gemini.isGeminiKey(settings.userApiKey)) {
-      const gm = settings.geminiModel || Gemini.FALLBACK_MODEL;
       const prompt = Prompts.writerPrompt(writerCtx);
-      const data = await Gemini.generate(settings.userApiKey, { model: gm, system: prompt.system, text: prompt.text, pdfBase64: prompt.pdfBase64 },
-        { timeoutMs: 90000, retries: 2, onRetry: retryNotice(key) }); // free tier can be slow
-      text = Gemini.textOf(data);
+      const { result, model: gm } = await geminiWithFallback(settings, async (m) => Gemini.textOf(await Gemini.generate(settings.userApiKey,
+        { model: m, system: prompt.system, text: prompt.text, pdfBase64: prompt.pdfBase64 },
+        { timeoutMs: 90000, retries: 1, onRetry: retryNotice(key) }))); // free tier can be slow
+      text = result;
       engine = `gemini:${gm}`;
     } else {
       const data = await Claude.create(settings.userApiKey, Prompts.writerBody(writerCtx), { timeoutMs: 60000, retries: 2, betas: Prompts.betasFor(model), onRetry: retryNotice(key) });
@@ -450,17 +450,28 @@ async function testKey(rawKey) {
       // Listing models proves the key is valid. The test message then proves the
       // project may generate (Google can refuse free-tier use). The free tier is
       // sometimes slow, so a slow answer still counts as a working key.
-      const model = await Gemini.pickModel(key);
-      save.geminiModel = model;
-      try {
-        const data = await Gemini.generate(key, { model, system: 'Follow the instruction exactly.', text: 'Reply with the single word: OK', maxTokens: 1024 },
-          { timeoutMs: 45000, retries: 0 });
-        Gemini.textOf(data);
-        status = { status: 'valid', provider: 'gemini', model };
-      } catch (err) {
-        if (err.code !== 'timeout') throw err;
-        status = { status: 'valid', provider: 'gemini', model, slow: true };
+      // Listing models proves the key is valid. Then find a model that actually
+      // answers: the newest one is often overloaded or limited on the free tier.
+      const models = await Gemini.rankModels(key);
+      save.geminiModels = models;
+      save.geminiModel = models[0];
+      let lastErr = null, slowModel = null;
+      for (const model of models.slice(0, 4)) {
+        try {
+          const data = await Gemini.generate(key, { model, system: 'Follow the instruction exactly.', text: 'Reply with the single word: OK', maxTokens: 1024 },
+            { timeoutMs: 30000, retries: 0 });
+          Gemini.textOf(data);
+          save.geminiModel = model;
+          status = { status: 'valid', provider: 'gemini', model };
+          break;
+        } catch (err) {
+          if (!Gemini.TRY_NEXT.has(err.code)) throw err; // bad key, billing: no other model will help
+          if (err.code === 'timeout' && !slowModel) slowModel = model;
+          lastErr = err;
+        }
       }
+      if (!status && slowModel) { save.geminiModel = slowModel; status = { status: 'valid', provider: 'gemini', model: slowModel, slow: true }; }
+      if (!status) throw lastErr;
     } else {
       const data = await Claude.create(key, {
         model: 'claude-haiku-5-5', max_tokens: 1024, output_config: { effort: 'low' },
@@ -477,6 +488,25 @@ async function testKey(rawKey) {
   if (status.status !== 'invalid') save.userApiKey = key;
   await chrome.storage.local.set(save);
   return { keyStatus: status };
+}
+
+// Try the saved Gemini model, then the next ones from the ranked list, when Google
+// says a model is overloaded or unavailable. Remember whichever one worked.
+async function geminiWithFallback(settings, fn) {
+  const list = [settings.geminiModel || Gemini.FALLBACK_MODEL, ...(settings.geminiModels || [])]
+    .filter((m, i, a) => m && a.indexOf(m) === i).slice(0, 3);
+  let lastErr;
+  for (const m of list) {
+    try {
+      const result = await fn(m);
+      if (m !== settings.geminiModel) await chrome.storage.local.set({ geminiModel: m });
+      return { result, model: m };
+    } catch (err) {
+      lastErr = err;
+      if (!Gemini.TRY_NEXT.has(err.code)) throw err;
+    }
+  }
+  throw lastErr;
 }
 
 // Lets the panel know which key a status belongs to without storing the key twice.
